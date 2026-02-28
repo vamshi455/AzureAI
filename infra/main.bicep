@@ -51,16 +51,16 @@ param hubVnetAddressSpace string = '10.0.0.0/16'
 param spokeVnetAddressSpace string = '10.1.0.0/16'
 
 // --- PostgreSQL Parameters ---
+@description('Enable PostgreSQL Flexible Server deployment.')
+param enablePostgresql bool = true
+
 @description('PostgreSQL administrator login.')
-@minLength(3)
-@maxLength(63)
 @secure()
-param postgresAdminLogin string
+param postgresAdminLogin string = ''
 
 @description('PostgreSQL administrator password.')
 @secure()
-@minLength(8)
-param postgresAdminPassword string
+param postgresAdminPassword string = ''
 
 @description('PostgreSQL SKU name.')
 @allowed(['Standard_B1ms', 'Standard_B2s', 'Standard_D2s_v3', 'Standard_D4s_v3', 'Standard_D8s_v3'])
@@ -75,6 +75,9 @@ param postgresStorageSizeGB int = 64
 param keyVaultAdminObjectId string
 
 // --- App Service Parameters ---
+@description('Enable App Service deployment.')
+param enableAppService bool = true
+
 @description('App Service Plan SKU.')
 @allowed(['B1', 'B2', 'B3', 'S1', 'S2', 'S3', 'P1v3', 'P2v3', 'P3v3'])
 param appServicePlanSku string = 'B2'
@@ -196,7 +199,7 @@ module keyvault 'modules/keyvault/main.bicep' = {
 }
 
 // --- PostgreSQL ---
-module postgresql 'modules/postgresql/main.bicep' = {
+module postgresql 'modules/postgresql/main.bicep' = if (enablePostgresql) {
   scope: rg
   name: 'postgresql-${environment}'
   params: {
@@ -235,7 +238,7 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (enableAIFoundry) {
 }
 
 // --- App Service ---
-module appService 'modules/app-service/main.bicep' = {
+module appService 'modules/app-service/main.bicep' = if (enableAppService) {
   scope: rg
   name: 'app-service-${environment}'
   params: {
@@ -250,7 +253,7 @@ module appService 'modules/app-service/main.bicep' = {
     applicationInsightsConnectionString: monitoring.outputs.applicationInsightsConnectionString
     platformIdentityId: identity.outputs.platformIdentityId
     keyVaultUri: keyvault.outputs.keyVaultUri
-    postgresqlFqdn: postgresql.outputs.fqdn
+    postgresqlFqdn: enablePostgresql ? postgresql.outputs.fqdn : 'not-deployed'
   }
 }
 
@@ -307,6 +310,6 @@ output resourceGroupName string = rg.name
 output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsWorkspaceId
 output spokeVnetId string = networking.outputs.spokeVnetId
 output keyVaultUri string = keyvault.outputs.keyVaultUri
-output postgresqlFqdn string = postgresql.outputs.fqdn
+output postgresqlFqdn string = enablePostgresql ? postgresql.outputs.fqdn : 'not-deployed'
 output platformIdentityId string = identity.outputs.platformIdentityId
 output platformIdentityClientId string = identity.outputs.platformIdentityClientId

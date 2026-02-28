@@ -90,7 +90,7 @@ resource adminRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultAdministratorRoleId)
     principalId: adminObjectId
-    principalType: 'Group'
+    principalType: 'User'
   }
 }
 

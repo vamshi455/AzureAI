@@ -106,38 +106,42 @@ resource actionGroup 'Microsoft.Insights/actionGroups@2023-09-01-preview' = {
 // ============================================================================
 
 // High Log Analytics Ingestion Alert
-resource highIngestionAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
+// Note: Uses a log-based scheduled query alert instead of metric alert,
+// since Log Analytics metric names vary by region and API version.
+resource highIngestionAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = {
   name: '${resourcePrefix}-alert-high-ingestion-${environment}'
-  location: 'global'
+  location: location
   tags: tags
   properties: {
+    displayName: 'High Log Analytics Ingestion'
     description: 'Alert when Log Analytics data ingestion exceeds threshold'
     severity: 2
     enabled: true
+    evaluationFrequency: 'PT1H'
     scopes: [
       logAnalyticsWorkspace.id
     ]
-    evaluationFrequency: 'PT1H'
     windowSize: 'PT1H'
     criteria: {
-      'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
       allOf: [
         {
-          name: 'HighIngestion'
-          criterionType: 'StaticThresholdCriterion'
-          metricNamespace: 'Microsoft.OperationalInsights/workspaces'
-          metricName: 'IngestionVolumeMB'
-          operator: 'GreaterThan'
-          threshold: environment == 'prod' ? 5000 : 1000
+          query: 'Usage | where IsBillable == true | summarize DataGB = sum(Quantity) / 1000'
           timeAggregation: 'Total'
+          metricMeasureColumn: 'DataGB'
+          operator: 'GreaterThan'
+          threshold: environment == 'prod' ? 5 : 1
+          failingPeriods: {
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
+          }
         }
       ]
     }
-    actions: [
-      {
-        actionGroupId: actionGroup.id
-      }
-    ]
+    actions: {
+      actionGroups: [
+        actionGroup.id
+      ]
+    }
   }
 }
 

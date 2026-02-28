@@ -1,0 +1,283 @@
+name: Infrastructure Deployment (Bicep)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "infra/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
+      skip_what_if:
+        description: "Skip what-if preview"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  BICEP_VERSION: "0.30.x"
+  AZURE_REGION: "eastus2"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Determine which environments to deploy
+  # ---------------------------------------------------------------------------
+  setup:
+    name: Setup Deployment Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      environments: ${{ steps.set-matrix.outputs.environments }}
+    steps:
+      - name: Set environment matrix
+        id: set-matrix
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "environments=[\"${{ inputs.environment }}\"]" >> "$GITHUB_OUTPUT"
+          else
+            echo 'environments=["dev","qa","prod"]' >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Lint all Bicep files
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Bicep Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bicep CLI
+        uses: azure/setup-bicep@v0.3.0
+        with:
+          version: ${{ env.BICEP_VERSION }}
+
+      - name: Run Bicep linter
+        run: |
+          echo "::group::Linting Bicep files"
+          find infra -name '*.bicep' -type f | while read -r file; do
+            echo "Linting: $file"
+            az bicep build --file "$file" --stdout > /dev/null
+          done
+          echo "::endgroup::"
+
+      - name: Run Bicep format check
+        run: |
+          find infra -name '*.bicep' -type f | while read -r file; do
+            az bicep format --file "$file" --check
+          done
+
+  # ---------------------------------------------------------------------------
+  # Validate Bicep templates against Azure
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate (${{ matrix.environment }})
+    needs: [setup, lint]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJson(needs.setup.outputs.environments) }}
+    environment: ${{ matrix.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Validate Bicep deployment
+        uses: azure/arm-deploy@v2
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          region: ${{ env.AZURE_REGION }}
+          template: infra/main.bicep
+          parameters: infra/parameters/${{ matrix.environment }}.bicepparam
+          deploymentMode: Validate
+          deploymentName: validate-${{ matrix.environment }}-${{ github.run_number }}
+          failOnStdErr: true
+
+  # ---------------------------------------------------------------------------
+  # What-If analysis (change preview)
+  # ---------------------------------------------------------------------------
+  what-if:
+    name: What-If (${{ matrix.environment }})
+    needs: [setup, validate]
+    if: ${{ !inputs.skip_what_if }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJson(needs.setup.outputs.environments) }}
+    environment: ${{ matrix.environment }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run What-If analysis
+        uses: azure/arm-deploy@v2
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          region: ${{ env.AZURE_REGION }}
+          template: infra/main.bicep
+          parameters: infra/parameters/${{ matrix.environment }}.bicepparam
+          additionalArguments: --what-if --what-if-result-format FullResourcePayloads
+          deploymentName: whatif-${{ matrix.environment }}-${{ github.run_number }}
+          failOnStdErr: false
+
+  # ---------------------------------------------------------------------------
+  # Deploy to Dev (automatic on push to main)
+  # ---------------------------------------------------------------------------
+  deploy-dev:
+    name: Deploy to Dev
+    needs: [setup, what-if]
+    if: ${{ always() && needs.validate.result == 'success' && contains(fromJson(needs.setup.outputs.environments), 'dev') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+      url: https://portal.azure.com
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Bicep to Dev
+        uses: azure/arm-deploy@v2
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          region: ${{ env.AZURE_REGION }}
+          template: infra/main.bicep
+          parameters: infra/parameters/dev.bicepparam
+          deploymentMode: Incremental
+          deploymentName: deploy-dev-${{ github.run_number }}
+          failOnStdErr: true
+
+      - name: Verify deployment
+        run: |
+          echo "::notice::Dev deployment completed successfully"
+          az deployment sub show \
+            --name deploy-dev-${{ github.run_number }} \
+            --query '{state: properties.provisioningState, timestamp: properties.timestamp}' \
+            -o table
+
+  # ---------------------------------------------------------------------------
+  # Deploy to QA (automatic after Dev succeeds)
+  # ---------------------------------------------------------------------------
+  deploy-qa:
+    name: Deploy to QA
+    needs: [setup, deploy-dev]
+    if: ${{ contains(fromJson(needs.setup.outputs.environments), 'qa') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: qa
+      url: https://portal.azure.com
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Bicep to QA
+        uses: azure/arm-deploy@v2
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          region: ${{ env.AZURE_REGION }}
+          template: infra/main.bicep
+          parameters: infra/parameters/qa.bicepparam
+          deploymentMode: Incremental
+          deploymentName: deploy-qa-${{ github.run_number }}
+          failOnStdErr: true
+
+      - name: Verify deployment
+        run: |
+          echo "::notice::QA deployment completed successfully"
+          az deployment sub show \
+            --name deploy-qa-${{ github.run_number }} \
+            --query '{state: properties.provisioningState, timestamp: properties.timestamp}' \
+            -o table
+
+  # ---------------------------------------------------------------------------
+  # Deploy to Prod (requires manual approval via environment protection)
+  # ---------------------------------------------------------------------------
+  deploy-prod:
+    name: Deploy to Prod
+    needs: [setup, deploy-qa]
+    if: ${{ contains(fromJson(needs.setup.outputs.environments), 'prod') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+      url: https://portal.azure.com
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Bicep to Prod
+        uses: azure/arm-deploy@v2
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          region: ${{ env.AZURE_REGION }}
+          template: infra/main.bicep
+          parameters: infra/parameters/prod.bicepparam
+          deploymentMode: Incremental
+          deploymentName: deploy-prod-${{ github.run_number }}
+          failOnStdErr: true
+
+      - name: Verify deployment
+        run: |
+          echo "::notice::Prod deployment completed successfully"
+          az deployment sub show \
+            --name deploy-prod-${{ github.run_number }} \
+            --query '{state: properties.provisioningState, timestamp: properties.timestamp}' \
+            -o table
+
+      - name: Create deployment tag
+        run: |
+          git tag "infra-prod-v${{ github.run_number }}" "${{ github.sha }}"
+          git push origin "infra-prod-v${{ github.run_number }}"

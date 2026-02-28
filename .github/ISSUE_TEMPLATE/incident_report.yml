@@ -1,0 +1,173 @@
+name: Incident Report
+description: Report a production incident or outage
+title: "[Incident]: "
+labels: ["incident", "priority:critical"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **PRODUCTION INCIDENT REPORT**
+
+        Use this template for production incidents requiring immediate attention.
+        For non-production issues, use the Bug Report template instead.
+
+        **Reminder:** Follow the incident response runbook at `documentation/runbooks/incident-response.md`
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Incident Severity
+      description: |
+        SEV1: Complete outage or data loss affecting production users
+        SEV2: Major degradation, critical feature unavailable
+        SEV3: Partial degradation, workaround available
+      options:
+        - "SEV1 - Complete outage / data loss"
+        - "SEV2 - Major degradation"
+        - "SEV3 - Partial degradation"
+    validations:
+      required: true
+
+  - type: input
+    id: start-time
+    attributes:
+      label: Incident Start Time
+      description: When was the incident first detected? Use UTC.
+      placeholder: "YYYY-MM-DD HH:MM UTC"
+    validations:
+      required: true
+
+  - type: input
+    id: detection
+    attributes:
+      label: Detection Method
+      description: How was the incident detected?
+      placeholder: "e.g., Azure Monitor alert, user report, pipeline failure notification"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-services
+    attributes:
+      label: Affected Services
+      description: Which services are impacted?
+      multiple: true
+      options:
+        - Microsoft Fabric (Lakehouse)
+        - Microsoft Fabric (Data Pipelines)
+        - Microsoft Purview
+        - AI Foundry
+        - PostgreSQL / pgvector
+        - Streamlit Admin App
+        - React Web App
+        - Azure Networking
+        - Azure Key Vault
+        - Authentication / Entra ID
+        - Data Ingestion
+        - Data Processing (Bronze/Silver/Gold)
+        - AI/ML Services
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: user-impact
+    attributes:
+      label: User Impact
+      description: How are users affected?
+      options:
+        - "All users unable to access the platform"
+        - "Subset of users affected"
+        - "Data processing delayed"
+        - "AI/ML features unavailable"
+        - "Admin functions unavailable"
+        - "Read-only access, writes failing"
+        - "Performance degraded but functional"
+        - "No direct user impact yet"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Incident Description
+      description: Describe the incident. What is happening? What symptoms are observed?
+      placeholder: |
+        Summary of the incident...
+        - Error messages observed
+        - Services returning errors
+        - Dashboard/monitoring observations
+    validations:
+      required: true
+
+  - type: textarea
+    id: timeline
+    attributes:
+      label: Timeline of Events
+      description: Chronological log of events related to this incident.
+      placeholder: |
+        - HH:MM UTC - Incident first detected via [method]
+        - HH:MM UTC - Initial investigation started
+        - HH:MM UTC - Root cause identified as [cause]
+        - HH:MM UTC - Mitigation applied
+        - HH:MM UTC - Service restored
+    validations:
+      required: true
+
+  - type: textarea
+    id: root-cause
+    attributes:
+      label: Root Cause (if known)
+      description: What caused this incident? Leave blank if still investigating.
+      placeholder: |
+        The root cause was...
+        - Related deployment/change:
+        - Related Azure resource:
+
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Mitigation / Resolution Steps
+      description: What steps were taken (or are being taken) to resolve the incident?
+      placeholder: |
+        1. Step taken...
+        2. Step taken...
+
+  - type: textarea
+    id: data-impact
+    attributes:
+      label: Data Impact Assessment
+      description: Was any data lost, corrupted, or exposed?
+      placeholder: |
+        - Data loss: Yes/No
+        - Data corruption: Yes/No
+        - Data exposure: Yes/No
+        - Affected datasets/tables:
+        - Recovery plan:
+
+  - type: textarea
+    id: action-items
+    attributes:
+      label: Follow-up Action Items
+      description: What actions should be taken to prevent recurrence?
+      placeholder: |
+        - [ ] Action item 1
+        - [ ] Action item 2
+        - [ ] Update runbook for this scenario
+        - [ ] Add monitoring/alerting for this failure mode
+
+  - type: checkboxes
+    id: notifications
+    attributes:
+      label: Notification Checklist
+      description: Confirm that relevant parties have been notified.
+      options:
+        - label: Team lead has been notified
+          required: false
+        - label: Affected stakeholders have been notified
+          required: false
+        - label: Azure support ticket created (if applicable)
+          required: false
+        - label: Post-incident review scheduled
+          required: false

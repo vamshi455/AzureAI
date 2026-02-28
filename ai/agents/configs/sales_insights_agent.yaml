@@ -1,0 +1,296 @@
+# =============================================================================
+# Azure AI Foundry Agent Configuration - Sales Insights Agent
+# Purpose: Conversational analytics agent for sales performance Q&A.
+#          Answers natural language questions against gold layer data with
+#          visualizations, trend analysis, and executive summaries.
+# Platform: Azure AI Foundry (formerly Azure AI Studio)
+# =============================================================================
+
+agent:
+  name: "sales-insights-agent"
+  display_name: "Sales Insights Agent"
+  description: >
+    Conversational analytics agent that answers natural language questions about
+    sales performance, customer behavior, product trends, and revenue metrics.
+    Connected to the gold layer data lakehouse for real-time insights.
+  version: "2.0.0"
+  tags:
+    - "sales-analytics"
+    - "business-intelligence"
+    - "conversational-ai"
+    - "executive-reporting"
+
+# -- Model Configuration --
+model:
+  deployment_name: "gpt-4o"
+  model_name: "gpt-4o"
+  api_version: "2025-04-01-preview"
+  endpoint: "${AZURE_OPENAI_ENDPOINT}"
+  parameters:
+    temperature: 0.2              # Slightly higher for natural conversation
+    max_tokens: 4096
+    top_p: 0.95
+    frequency_penalty: 0.1        # Mild penalty to reduce repetition
+    presence_penalty: 0.1
+
+# -- System Instructions --
+instructions:
+  system_prompt_file: "ai/prompts/system/sales_insights.md"
+  additional_instructions: |
+    CRITICAL OPERATIONAL RULES:
+    1. Always query the connected data sources before answering data questions.
+    2. Format numbers appropriately: use currency symbols, percentage signs, and
+       thousands separators (e.g., $1,234,567.89 or 15.3%).
+    3. When comparing time periods, always specify the exact dates being compared.
+    4. If a question is ambiguous, ask for clarification before querying data.
+    5. For executive audiences, lead with the key insight, then supporting data.
+    6. Always mention data freshness (when the data was last updated).
+
+# -- Knowledge Sources (Grounding) --
+knowledge_sources:
+  # Microsoft Fabric Data Agent for live analytics queries
+  - type: "fabric_data_agent"
+    name: "fabric-gold-analytics"
+    description: "Live connection to gold layer for sales analytics and KPIs"
+    connection:
+      workspace_id: "${FABRIC_WORKSPACE_ID}"
+      lakehouse_name: "lh_gold"
+    tables:
+      - "fact_sales"
+      - "dim_product"
+      - "dim_customer"
+      - "dim_date"
+      - "agg_product_metrics"
+      - "agg_demand_forecast"
+    query_instructions: |
+      QUERY GUIDELINES FOR SALES ANALYTICS:
+
+      Common query patterns:
+      - Revenue by period: JOIN fact_sales with dim_date, SUM(net_value), GROUP BY period
+      - Top products: JOIN fact_sales with dim_product, SUM(net_value) DESC, LIMIT N
+      - Customer analysis: JOIN fact_sales with dim_customer, aggregate by customer
+      - YoY comparison: Use agg_product_metrics with yoy_revenue_growth
+      - Trend analysis: Use agg_product_metrics monthly data or agg_demand_forecast daily data
+
+      Always:
+      - Filter out rejected orders (is_rejected = false) unless specifically asked about rejections
+      - Use dim_date for fiscal year alignment when asked about FY metrics
+      - JOIN dim_product for human-readable product names
+      - Respect currency when aggregating (don't mix currencies)
+
+  # Azure AI Search for business glossary and report definitions
+  - type: "azure_ai_search"
+    name: "business-glossary"
+    description: "Business term definitions, KPI formulas, and report specifications"
+    connection:
+      endpoint: "${AI_SEARCH_ENDPOINT}"
+      index_name: "business-glossary-index"
+      api_key_secret: "ai-search-api-key"
+    search_config:
+      query_type: "semantic"
+      semantic_configuration: "glossary-semantic-config"
+      top_k: 3
+
+  # pgvector for retrieving past analysis context
+  - type: "custom_api"
+    name: "rag-analysis-history"
+    description: "Historical sales analysis reports and executive summaries"
+    connection:
+      endpoint: "${RAG_API_ENDPOINT}/query"
+      authentication:
+        type: "api_key"
+        header: "X-API-Key"
+        secret_name: "rag-api-key"
+
+# -- Tools --
+tools:
+  - type: "code_interpreter"
+    description: "Execute Python code for data analysis and chart generation"
+    enabled: true
+    settings:
+      timeout_seconds: 120
+      allowed_packages:
+        - "pandas"
+        - "numpy"
+        - "matplotlib"
+        - "seaborn"
+        - "plotly"
+
+  - type: "function"
+    name: "query_sales_data"
+    description: "Execute a structured query against the sales fact table"
+    parameters:
+      type: "object"
+      required: ["query_type"]
+      properties:
+        query_type:
+          type: "string"
+          enum:
+            - "revenue_summary"
+            - "top_products"
+            - "top_customers"
+            - "sales_trend"
+            - "order_analysis"
+            - "rejection_analysis"
+          description: "Type of sales query to execute"
+        time_period:
+          type: "object"
+          properties:
+            start_date:
+              type: "string"
+              format: "date"
+            end_date:
+              type: "string"
+              format: "date"
+            period_type:
+              type: "string"
+              enum: ["daily", "weekly", "monthly", "quarterly", "yearly"]
+        filters:
+          type: "object"
+          properties:
+            sales_organization:
+              type: "string"
+            plant:
+              type: "string"
+            material_group:
+              type: "string"
+            customer_number:
+              type: "string"
+        top_n:
+          type: "integer"
+          default: 10
+          description: "Number of top results to return"
+        compare_with:
+          type: "string"
+          enum: ["previous_period", "same_period_last_year", "none"]
+          default: "none"
+
+  - type: "function"
+    name: "generate_executive_summary"
+    description: "Generate a formatted executive summary for a given time period"
+    parameters:
+      type: "object"
+      required: ["period_start", "period_end"]
+      properties:
+        period_start:
+          type: "string"
+          format: "date"
+        period_end:
+          type: "string"
+          format: "date"
+        focus_areas:
+          type: "array"
+          items:
+            type: "string"
+            enum: ["revenue", "volume", "customers", "products", "regions", "rejections"]
+          default: ["revenue", "volume", "products"]
+        audience:
+          type: "string"
+          enum: ["executive", "manager", "analyst"]
+          default: "executive"
+
+  - type: "function"
+    name: "get_kpi_dashboard"
+    description: "Retrieve current KPI values for the sales dashboard"
+    parameters:
+      type: "object"
+      properties:
+        kpi_names:
+          type: "array"
+          items:
+            type: "string"
+            enum:
+              - "total_revenue"
+              - "total_orders"
+              - "avg_order_value"
+              - "unique_customers"
+              - "fill_rate"
+              - "rejection_rate"
+              - "yoy_growth"
+          default: ["total_revenue", "total_orders", "avg_order_value", "yoy_growth"]
+        period:
+          type: "string"
+          enum: ["mtd", "qtd", "ytd", "last_30_days", "last_90_days"]
+          default: "mtd"
+
+# -- Guardrails --
+guardrails:
+  content_safety:
+    enabled: true
+    categories:
+      hate: "medium"
+      violence: "medium"
+      self_harm: "medium"
+      sexual: "medium"
+
+  grounding:
+    enabled: true
+    max_hallucination_score: 0.2   # Stricter for factual business data
+
+  output_validation:
+    enforce_data_citation: true
+    require_date_range_context: true
+    prohibit_absolute_predictions: true  # Don't say "will definitely"
+    number_formatting:
+      currency_symbol: "$"
+      thousands_separator: ","
+      decimal_places: 2
+
+  topic_guardrails:
+    allowed_topics:
+      - "sales performance"
+      - "revenue analysis"
+      - "customer analytics"
+      - "product metrics"
+      - "order trends"
+      - "demand patterns"
+      - "inventory levels"
+      - "pricing analysis"
+    blocked_topics:
+      - "employee performance reviews"
+      - "salary information"
+      - "personal customer data (PII)"
+      - "competitor pricing strategies"
+
+# -- Conversation Settings --
+conversation:
+  max_turns: 50
+  greeting_message: >
+    Hello! I'm your Sales Insights Agent. I can help you analyze sales performance,
+    identify trends, and answer questions about your business data.
+
+    Some things I can help with:
+    - Revenue and volume trends by product, customer, or region
+    - Top/bottom performing products and customers
+    - Year-over-year comparisons
+    - Executive summaries for any time period
+
+    What would you like to know?
+
+  suggested_questions:
+    - "What were our top 10 products by revenue last quarter?"
+    - "Show me the monthly revenue trend for the past 12 months"
+    - "Which customers have the highest year-over-year growth?"
+    - "Generate an executive summary for Q4 FY2025"
+    - "What is our current order rejection rate and top rejection reasons?"
+
+# -- Evaluation --
+evaluation:
+  enabled: true
+  metrics:
+    - "groundedness"
+    - "relevance"
+    - "coherence"
+    - "data_accuracy"
+  test_dataset: "ai/evaluation/test_sets/sales_insights_eval.jsonl"
+  schedule: "weekly"
+
+# -- Deployment --
+deployment:
+  auto_scale: true
+  min_instances: 1
+  max_instances: 10
+  target_utilization: 0.7
+  rate_limits:
+    requests_per_minute: 120
+    tokens_per_minute: 150000

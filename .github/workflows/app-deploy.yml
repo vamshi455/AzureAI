@@ -1,0 +1,392 @@
+name: Application Deployment
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/**"
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "Application to deploy"
+        required: true
+        type: choice
+        options:
+          - all
+          - streamlit
+          - react
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  STREAMLIT_IMAGE: ghcr.io/${{ github.repository }}/streamlit-admin
+  REACT_IMAGE: ghcr.io/${{ github.repository }}/react-webapp
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Detect which apps changed
+  # ---------------------------------------------------------------------------
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      streamlit: ${{ steps.filter.outputs.streamlit }}
+      react: ${{ steps.filter.outputs.react }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            streamlit:
+              - 'apps/streamlit-admin/**'
+            react:
+              - 'apps/react-webapp/**'
+
+  # ---------------------------------------------------------------------------
+  # Build Streamlit container
+  # ---------------------------------------------------------------------------
+  build-streamlit:
+    name: Build Streamlit Container
+    needs: changes
+    if: ${{ needs.changes.outputs.streamlit == 'true' || inputs.app == 'streamlit' || inputs.app == 'all' }}
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python (for tests)
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: apps/streamlit-admin/requirements.txt
+
+      - name: Install dependencies and run tests
+        run: |
+          pip install --upgrade pip
+          pip install -r apps/streamlit-admin/requirements.txt
+          pip install pytest pytest-cov
+          if [ -d "apps/streamlit-admin/tests" ]; then
+            pytest apps/streamlit-admin/tests/ -v --tb=short
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.STREAMLIT_IMAGE }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push Streamlit image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/streamlit-admin
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+  # ---------------------------------------------------------------------------
+  # Build React application
+  # ---------------------------------------------------------------------------
+  build-react:
+    name: Build React App
+    needs: changes
+    if: ${{ needs.changes.outputs.react == 'true' || inputs.app == 'react' || inputs.app == 'all' }}
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: apps/react-webapp/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/react-webapp
+        run: npm ci
+
+      - name: Run linter
+        working-directory: apps/react-webapp
+        run: npm run lint
+
+      - name: Run tests
+        working-directory: apps/react-webapp
+        run: npm test -- --passWithNoTests --ci
+
+      - name: Build application
+        working-directory: apps/react-webapp
+        run: npm run build
+        env:
+          CI: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REACT_IMAGE }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push React image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/react-webapp
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+  # ---------------------------------------------------------------------------
+  # Deploy to Dev
+  # ---------------------------------------------------------------------------
+  deploy-dev:
+    name: Deploy to Dev
+    needs: [build-streamlit, build-react]
+    if: ${{ always() && (needs.build-streamlit.result == 'success' || needs.build-react.result == 'success') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+      url: https://dev-app.${{ secrets.DOMAIN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Streamlit to App Service
+        if: ${{ needs.build-streamlit.result == 'success' }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.STREAMLIT_APP_SERVICE_NAME }}
+          images: ${{ env.STREAMLIT_IMAGE }}:${{ github.sha }}
+
+      - name: Deploy React to App Service
+        if: ${{ needs.build-react.result == 'success' }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.REACT_APP_SERVICE_NAME }}
+          images: ${{ env.REACT_IMAGE }}:${{ github.sha }}
+
+      - name: Health check - Streamlit
+        if: ${{ needs.build-streamlit.result == 'success' }}
+        run: |
+          echo "Waiting for Streamlit app to start..."
+          sleep 30
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://${{ secrets.STREAMLIT_APP_SERVICE_NAME }}.azurewebsites.net/healthz" \
+            --max-time 30)
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "::warning::Streamlit health check returned HTTP $HTTP_STATUS"
+          else
+            echo "::notice::Streamlit health check passed"
+          fi
+
+      - name: Health check - React
+        if: ${{ needs.build-react.result == 'success' }}
+        run: |
+          echo "Waiting for React app to start..."
+          sleep 30
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://${{ secrets.REACT_APP_SERVICE_NAME }}.azurewebsites.net/" \
+            --max-time 30)
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "::warning::React health check returned HTTP $HTTP_STATUS"
+          else
+            echo "::notice::React health check passed"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Deploy to QA
+  # ---------------------------------------------------------------------------
+  deploy-qa:
+    name: Deploy to QA
+    needs: [build-streamlit, build-react, deploy-dev]
+    if: ${{ always() && needs.deploy-dev.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: qa
+      url: https://qa-app.${{ secrets.DOMAIN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Streamlit to App Service
+        if: ${{ needs.build-streamlit.result == 'success' }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.STREAMLIT_APP_SERVICE_NAME }}
+          images: ${{ env.STREAMLIT_IMAGE }}:${{ github.sha }}
+
+      - name: Deploy React to App Service
+        if: ${{ needs.build-react.result == 'success' }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.REACT_APP_SERVICE_NAME }}
+          images: ${{ env.REACT_IMAGE }}:${{ github.sha }}
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests against QA environment..."
+          # Streamlit health
+          if [ "${{ needs.build-streamlit.result }}" == "success" ]; then
+            sleep 30
+            curl -sf "https://${{ secrets.STREAMLIT_APP_SERVICE_NAME }}.azurewebsites.net/healthz" \
+              --max-time 30 || echo "::warning::Streamlit smoke test failed"
+          fi
+          # React health
+          if [ "${{ needs.build-react.result }}" == "success" ]; then
+            curl -sf "https://${{ secrets.REACT_APP_SERVICE_NAME }}.azurewebsites.net/" \
+              --max-time 30 || echo "::warning::React smoke test failed"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Deploy to Prod (manual approval via environment protection)
+  # ---------------------------------------------------------------------------
+  deploy-prod:
+    name: Deploy to Prod
+    needs: [build-streamlit, build-react, deploy-qa]
+    if: ${{ always() && needs.deploy-qa.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+      url: https://app.${{ secrets.DOMAIN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Streamlit to App Service (staging slot)
+        if: ${{ needs.build-streamlit.result == 'success' }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.STREAMLIT_APP_SERVICE_NAME }}
+          slot-name: staging
+          images: ${{ env.STREAMLIT_IMAGE }}:${{ github.sha }}
+
+      - name: Deploy React to App Service (staging slot)
+        if: ${{ needs.build-react.result == 'success' }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.REACT_APP_SERVICE_NAME }}
+          slot-name: staging
+          images: ${{ env.REACT_IMAGE }}:${{ github.sha }}
+
+      - name: Health check staging slots
+        run: |
+          echo "Checking staging slot health before swap..."
+          sleep 30
+          if [ "${{ needs.build-streamlit.result }}" == "success" ]; then
+            curl -sf "https://${{ secrets.STREAMLIT_APP_SERVICE_NAME }}-staging.azurewebsites.net/healthz" \
+              --max-time 30 || { echo "::error::Streamlit staging health check failed"; exit 1; }
+          fi
+          if [ "${{ needs.build-react.result }}" == "success" ]; then
+            curl -sf "https://${{ secrets.REACT_APP_SERVICE_NAME }}-staging.azurewebsites.net/" \
+              --max-time 30 || { echo "::error::React staging health check failed"; exit 1; }
+          fi
+
+      - name: Swap Streamlit staging to production
+        if: ${{ needs.build-streamlit.result == 'success' }}
+        run: |
+          az webapp deployment slot swap \
+            --resource-group ${{ secrets.PROD_RESOURCE_GROUP }} \
+            --name ${{ secrets.STREAMLIT_APP_SERVICE_NAME }} \
+            --slot staging \
+            --target-slot production
+
+      - name: Swap React staging to production
+        if: ${{ needs.build-react.result == 'success' }}
+        run: |
+          az webapp deployment slot swap \
+            --resource-group ${{ secrets.PROD_RESOURCE_GROUP }} \
+            --name ${{ secrets.REACT_APP_SERVICE_NAME }} \
+            --slot staging \
+            --target-slot production
+
+      - name: Create release tag
+        run: |
+          git tag "app-prod-v${{ github.run_number }}" "${{ github.sha }}"
+          git push origin "app-prod-v${{ github.run_number }}"
+
+      - name: Post-deploy verification
+        run: |
+          echo "::notice::Production deployment completed"
+          echo "Streamlit: https://${{ secrets.STREAMLIT_APP_SERVICE_NAME }}.azurewebsites.net"
+          echo "React: https://${{ secrets.REACT_APP_SERVICE_NAME }}.azurewebsites.net"

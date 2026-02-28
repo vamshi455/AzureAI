@@ -1,0 +1,292 @@
+# =============================================================================
+# Azure Data Platform - .gitignore
+# Python, Node.js, Bicep, Azure, IDE, secrets
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Python
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.whl
+.eggs/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Pytest
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.nox/
+.tox/
+
+# Mypy
+.mypy_cache/
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# IPython
+profile_default/
+ipython_config.py
+
+# -----------------------------------------------------------------------------
+# Node.js / React
+# -----------------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Build output
+apps/react-webapp/build/
+apps/react-webapp/dist/
+.next/
+out/
+
+# Package manager locks (keep package-lock.json, ignore others)
+# Uncomment the next line if using yarn:
+# yarn.lock
+
+# Testing
+coverage/
+*.lcov
+
+# Storybook
+storybook-static/
+
+# TypeScript
+*.tsbuildinfo
+
+# -----------------------------------------------------------------------------
+# Bicep / ARM
+# -----------------------------------------------------------------------------
+# Compiled ARM templates (Bicep generates these)
+*.json
+!infra/**/*.json
+!.github/**/*.json
+!apps/**/package.json
+!apps/**/package-lock.json
+!apps/**/tsconfig.json
+!apps/**/tsconfig.*.json
+!.vscode/*.json
+
+# Bicep module cache
+~/.bicep/
+
+# ARM deployment logs
+azuredeploy.log
+
+# -----------------------------------------------------------------------------
+# Azure
+# -----------------------------------------------------------------------------
+# Azure Functions
+local.settings.json
+.python_packages/
+
+# Azure CLI
+.azure/
+
+# Azure Storage Emulator
+__blobstorage__
+__queuestorage__
+__azurite_db*
+
+# -----------------------------------------------------------------------------
+# Docker
+# -----------------------------------------------------------------------------
+*.log
+docker-compose.override.yml
+.docker/
+
+# -----------------------------------------------------------------------------
+# Secrets and Credentials (CRITICAL - never commit these)
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Azure credentials
+*.publishsettings
+servicePrincipal.json
+azureauth.json
+credentials.json
+secrets.json
+*.pfx
+*.cer
+*.pem
+*.key
+
+# SSH keys
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+
+# API keys and tokens
+**/apikey*
+**/api_key*
+**/*secret*
+!**/*secret*.md
+!**/*secret*.yml
+!**/*secret*.yaml
+
+# Terraform state (if ever used alongside Bicep)
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+
+# Kubeconfig
+kubeconfig
+.kube/
+
+# -----------------------------------------------------------------------------
+# IDE and Editor
+# -----------------------------------------------------------------------------
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/*.code-snippets
+.history/
+*.vsix
+
+# JetBrains (PyCharm, WebStorm, IntelliJ)
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Vim
+*.swp
+*.swo
+*~
+Session.vim
+.netrwhist
+tags
+
+# Emacs
+*~
+\#*\#
+.#*
+auto-save-list
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# -----------------------------------------------------------------------------
+# macOS
+# -----------------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# -----------------------------------------------------------------------------
+# Windows
+# -----------------------------------------------------------------------------
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# -----------------------------------------------------------------------------
+# Linux
+# -----------------------------------------------------------------------------
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# -----------------------------------------------------------------------------
+# Misc
+# -----------------------------------------------------------------------------
+*.bak
+*.tmp
+*.temp
+*.orig
+*.rej
+*.patch
+*.diff
+.cache/
+tmp/
+temp/
+
+# Large files that should not be in git
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+*.parquet
+*.csv
+!**/test_data/*.csv
+*.xlsx
+!**/test_data/*.xlsx
+
+# Data files
+data/
+!data-platform/
+*.db
+*.sqlite
+*.sqlite3

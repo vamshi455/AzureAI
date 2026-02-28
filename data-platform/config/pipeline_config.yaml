@@ -1,0 +1,309 @@
+# =============================================================================
+# Pipeline Configuration - Azure Data Platform
+# Purpose: Centralized configuration for data ingestion pipelines, transformation
+#          schedules, connection settings, retry policies, and data quality thresholds.
+# Environment: Overridden per deployment stage via CI/CD variable substitution.
+# =============================================================================
+
+# -- Global Settings --
+global:
+  project_name: "manufacturing-sales-data-platform"
+  environment: "${ENVIRONMENT:dev}"   # dev | staging | prod
+  region: "eastus2"
+  resource_group: "${RESOURCE_GROUP:rg-data-platform-dev}"
+  fabric_workspace_id: "${FABRIC_WORKSPACE_ID}"
+  log_level: "INFO"
+  timezone: "UTC"
+
+# -- Lakehouse Configuration --
+lakehouses:
+  bronze:
+    name: "lh_bronze"
+    description: "Raw landing zone - immutable append-only"
+    retention_days: 90
+    auto_optimize: true
+    auto_compact: true
+  silver:
+    name: "lh_silver"
+    description: "Cleaned and conformed data with SCD2 history"
+    retention_days: 365
+    auto_optimize: true
+    auto_compact: true
+  gold:
+    name: "lh_gold"
+    description: "Curated business-ready tables for analytics and ML"
+    retention_days: 730
+    auto_optimize: true
+    auto_compact: true
+
+# -- Source Connection Configurations --
+sources:
+  erp_sap:
+    connection_type: "sap_table"
+    connection_name: "cn_sap_s4hana_prod"
+    host: "${SAP_HOST}"
+    system_number: "${SAP_SYSTEM_NUMBER:00}"
+    client: "${SAP_CLIENT:100}"
+    language: "EN"
+    authentication:
+      type: "key_vault"
+      key_vault_uri: "${KEY_VAULT_URI}"
+      username_secret: "sap-integration-username"
+      password_secret: "sap-integration-password"
+    tables:
+      - name: "VBAK"
+        target: "raw_sales_orders_header"
+        load_type: "incremental"
+        watermark_column: "AEDAT"
+        partition_column: "VBELN"
+        batch_size: 50000
+      - name: "VBAP"
+        target: "raw_sales_orders_item"
+        load_type: "incremental"
+        watermark_column: "AEDAT"
+        partition_column: "VBELN"
+        batch_size: 50000
+      - name: "MARD"
+        target: "raw_inventory"
+        load_type: "full"
+        batch_size: 100000
+      - name: "AFKO"
+        target: "raw_production_orders"
+        load_type: "incremental"
+        watermark_column: "AEDAT"
+        batch_size: 25000
+
+  crm_dynamics:
+    connection_type: "dataverse"
+    connection_name: "cn_dynamics365_crm"
+    environment_url: "${CRM_ENVIRONMENT_URL}"
+    authentication:
+      type: "service_principal"
+      key_vault_uri: "${KEY_VAULT_URI}"
+      tenant_id_secret: "crm-tenant-id"
+      client_id_secret: "crm-client-id"
+      client_secret_secret: "crm-client-secret"
+    entities:
+      - name: "account"
+        target: "raw_customers"
+        load_type: "incremental"
+        watermark_column: "modifiedon"
+        batch_size: 10000
+      - name: "contact"
+        target: "raw_contacts"
+        load_type: "incremental"
+        watermark_column: "modifiedon"
+        batch_size: 10000
+      - name: "opportunity"
+        target: "raw_opportunities"
+        load_type: "incremental"
+        watermark_column: "modifiedon"
+        batch_size: 5000
+
+  iot_sensors:
+    connection_type: "adls_gen2"
+    connection_name: "cn_adls_iot_landing"
+    storage_account: "${IOT_STORAGE_ACCOUNT}"
+    container: "iot-telemetry"
+    authentication:
+      type: "managed_identity"
+    source_format: "json"
+    paths:
+      - name: "temperature"
+        source_path: "sensors/temperature"
+        target: "raw_iot_telemetry"
+        load_type: "incremental"
+        file_pattern: "*.json"
+      - name: "vibration"
+        source_path: "sensors/vibration"
+        target: "raw_iot_telemetry"
+        load_type: "incremental"
+        file_pattern: "*.json"
+      - name: "pressure"
+        source_path: "sensors/pressure"
+        target: "raw_iot_telemetry"
+        load_type: "incremental"
+        file_pattern: "*.json"
+
+  pos_systems:
+    connection_type: "sql_server"
+    connection_name: "cn_pos_sql_server"
+    server: "${POS_SQL_SERVER}"
+    database: "${POS_SQL_DATABASE}"
+    authentication:
+      type: "key_vault"
+      key_vault_uri: "${KEY_VAULT_URI}"
+      username_secret: "pos-sql-username"
+      password_secret: "pos-sql-password"
+    tables:
+      - name: "dbo.Transactions"
+        target: "raw_pos_transactions"
+        load_type: "incremental"
+        watermark_column: "TransactionDate"
+        batch_size: 100000
+      - name: "dbo.TransactionItems"
+        target: "raw_pos_transaction_items"
+        load_type: "incremental"
+        watermark_column: "ModifiedDate"
+        batch_size: 200000
+
+# -- Pipeline Schedules --
+schedules:
+  bronze_erp_incremental:
+    pipeline: "pl_bronze_multi_source_ingestion"
+    cron: "*/15 * * * *"           # Every 15 minutes
+    description: "Incremental ERP data ingestion"
+    parameters:
+      load_type: "incremental"
+      source_filter: "ERP_SAP"
+    enabled: true
+
+  bronze_erp_full_load:
+    pipeline: "pl_bronze_multi_source_ingestion"
+    cron: "0 2 * * 0"             # Every Sunday at 2:00 AM UTC
+    description: "Weekly full ERP data refresh"
+    parameters:
+      load_type: "full"
+      source_filter: "ERP_SAP"
+    enabled: true
+
+  bronze_crm_incremental:
+    pipeline: "pl_bronze_multi_source_ingestion"
+    cron: "0 */2 * * *"           # Every 2 hours
+    description: "CRM data incremental sync"
+    parameters:
+      load_type: "incremental"
+      source_filter: "CRM"
+    enabled: true
+
+  bronze_iot_micro_batch:
+    pipeline: "pl_bronze_multi_source_ingestion"
+    cron: "*/5 * * * *"           # Every 5 minutes
+    description: "IoT telemetry micro-batch ingestion"
+    parameters:
+      load_type: "incremental"
+      source_filter: "IOT"
+    enabled: true
+
+  bronze_pos_incremental:
+    pipeline: "pl_bronze_multi_source_ingestion"
+    cron: "*/30 * * * *"          # Every 30 minutes
+    description: "POS transaction incremental sync"
+    parameters:
+      load_type: "incremental"
+      source_filter: "POS"
+    enabled: true
+
+  silver_transformations:
+    pipeline: "pl_silver_transformations"
+    cron: "10 */1 * * *"          # Hourly at :10 (after bronze completes)
+    description: "Bronze to silver transformations"
+    depends_on:
+      - "bronze_erp_incremental"
+      - "bronze_crm_incremental"
+    enabled: true
+
+  gold_aggregations:
+    pipeline: "pl_gold_aggregations"
+    cron: "0 6 * * *"             # Daily at 6:00 AM UTC
+    description: "Silver to gold aggregations and feature engineering"
+    depends_on:
+      - "silver_transformations"
+    enabled: true
+
+# -- Retry Policies --
+retry_policies:
+  default:
+    max_retries: 3
+    retry_interval_seconds: 60
+    backoff_multiplier: 2.0
+    max_retry_interval_seconds: 600
+
+  erp_sap:
+    max_retries: 5
+    retry_interval_seconds: 120
+    backoff_multiplier: 2.0
+    max_retry_interval_seconds: 1800
+    retry_on_errors:
+      - "COMMUNICATION_FAILURE"
+      - "TIMEOUT"
+      - "RFC_FAILURE"
+
+  iot_streaming:
+    max_retries: 10
+    retry_interval_seconds: 30
+    backoff_multiplier: 1.5
+    max_retry_interval_seconds: 300
+
+  crm_dataverse:
+    max_retries: 3
+    retry_interval_seconds: 60
+    backoff_multiplier: 2.0
+    max_retry_interval_seconds: 600
+    retry_on_errors:
+      - "429"  # Rate limited
+      - "503"  # Service unavailable
+      - "504"  # Gateway timeout
+
+# -- Data Quality Thresholds --
+data_quality:
+  global_thresholds:
+    null_rate_max: 0.05            # Maximum 5% nulls in critical columns
+    duplicate_rate_max: 0.01       # Maximum 1% duplicates after dedup
+    value_range_violation_max: 0.02  # Maximum 2% out-of-range values
+    referential_integrity_min: 0.95  # Minimum 95% referential integrity
+    freshness_max_hours: 4         # Max hours since last successful load
+    row_count_change_max_pct: 50   # Alert if row count changes >50%
+
+  table_overrides:
+    raw_iot_telemetry:
+      null_rate_max: 0.10          # IoT data may have more gaps
+      freshness_max_hours: 0.5     # Should be refreshed every 30 min
+    raw_sales_orders_header:
+      null_rate_max: 0.02          # Stricter for financial data
+      duplicate_rate_max: 0.005
+    cleaned_sales_orders:
+      null_rate_max: 0.01          # Silver should be very clean
+      duplicate_rate_max: 0.0
+    agg_demand_forecast:
+      null_rate_max: 0.15          # Rolling features will have nulls at edges
+
+  alerting:
+    enabled: true
+    channels:
+      - type: "email"
+        recipients:
+          - "data-engineering@company.com"
+          - "data-quality@company.com"
+        on_severity:
+          - "critical"
+      - type: "teams_webhook"
+        webhook_url: "${TEAMS_WEBHOOK_URL}"
+        on_severity:
+          - "critical"
+          - "warning"
+
+# -- Monitoring --
+monitoring:
+  pipeline_sla:
+    bronze_completion_by: "06:30 UTC"
+    silver_completion_by: "07:00 UTC"
+    gold_completion_by: "08:00 UTC"
+
+  metrics:
+    - name: "rows_ingested"
+      type: "counter"
+      description: "Total rows ingested per source per run"
+    - name: "ingestion_duration_seconds"
+      type: "histogram"
+      description: "Pipeline execution duration"
+    - name: "data_quality_score"
+      type: "gauge"
+      description: "Composite data quality score (0-100)"
+    - name: "pipeline_failure_count"
+      type: "counter"
+      description: "Number of pipeline failures"
+
+  log_analytics:
+    workspace_id: "${LOG_ANALYTICS_WORKSPACE_ID}"
+    enabled: true

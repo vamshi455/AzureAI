@@ -1,0 +1,213 @@
+# =============================================================================
+# Azure AI Foundry Agent Configuration - Demand Forecasting Agent
+# Purpose: AI agent that analyzes historical demand patterns, generates
+#          forecasts, and provides actionable inventory planning recommendations.
+# Platform: Azure AI Foundry (formerly Azure AI Studio)
+# =============================================================================
+
+agent:
+  name: "demand-forecast-agent"
+  display_name: "Demand Forecasting Agent"
+  description: >
+    AI-powered demand forecasting agent for manufacturing and sales planning.
+    Analyzes historical order data, seasonal patterns, and market signals to
+    generate product-level demand forecasts and inventory recommendations.
+  version: "2.1.0"
+  tags:
+    - "demand-planning"
+    - "forecasting"
+    - "manufacturing"
+    - "supply-chain"
+
+# -- Model Configuration --
+model:
+  deployment_name: "gpt-4.1"
+  model_name: "gpt-4.1"
+  api_version: "2025-04-01-preview"
+  endpoint: "${AZURE_OPENAI_ENDPOINT}"
+  parameters:
+    temperature: 0.1              # Low temperature for analytical consistency
+    max_tokens: 4096
+    top_p: 0.95
+    frequency_penalty: 0.0
+    presence_penalty: 0.0
+    response_format: "text"       # Use "json_object" for structured outputs
+
+# -- System Instructions --
+instructions:
+  system_prompt_file: "ai/prompts/system/demand_forecast.md"
+  additional_instructions: |
+    CRITICAL OPERATIONAL RULES:
+    1. Always ground your forecasts in the actual data from the connected data sources.
+    2. When you don't have sufficient data for a forecast, explicitly state the confidence level and data gaps.
+    3. Never fabricate demand numbers. If data is unavailable, say so clearly.
+    4. Include the date range and data freshness in every forecast response.
+    5. For anomaly detection, flag any demand change exceeding 2 standard deviations from the rolling mean.
+
+# -- Knowledge Sources (Grounding) --
+knowledge_sources:
+  # Microsoft Fabric Data Agent connection for live data access
+  - type: "fabric_data_agent"
+    name: "fabric-gold-layer"
+    description: "Live connection to gold layer demand forecast features and sales facts"
+    connection:
+      workspace_id: "${FABRIC_WORKSPACE_ID}"
+      lakehouse_name: "lh_gold"
+    tables:
+      - "agg_demand_forecast"
+      - "fact_sales"
+      - "dim_product"
+      - "dim_customer"
+      - "dim_date"
+      - "agg_product_metrics"
+    query_instructions: |
+      When querying demand data:
+      - Use agg_demand_forecast for ML features and time-series analysis
+      - Use fact_sales for granular order-level analysis
+      - Use agg_product_metrics for monthly performance summaries
+      - Always filter by _is_current = true for silver tables
+      - Join dim_product for product names and categories
+      - Join dim_date for fiscal calendar alignment
+
+  # RAG knowledge base for product documentation and planning context
+  - type: "azure_ai_search"
+    name: "product-knowledge-base"
+    description: "Product catalog, supplier lead times, and planning parameters"
+    connection:
+      endpoint: "${AI_SEARCH_ENDPOINT}"
+      index_name: "product-catalog-index"
+      api_key_secret: "ai-search-api-key"
+    search_config:
+      query_type: "semantic"
+      semantic_configuration: "product-semantic-config"
+      top_k: 5
+
+  # pgvector for dense retrieval of historical analysis documents
+  - type: "custom_api"
+    name: "rag-pgvector"
+    description: "Historical demand analysis reports and planning documents"
+    connection:
+      endpoint: "${RAG_API_ENDPOINT}/query"
+      authentication:
+        type: "api_key"
+        header: "X-API-Key"
+        secret_name: "rag-api-key"
+
+# -- Tools --
+tools:
+  - type: "code_interpreter"
+    description: "Execute Python code for statistical analysis and visualizations"
+    enabled: true
+    settings:
+      timeout_seconds: 120
+      allowed_packages:
+        - "pandas"
+        - "numpy"
+        - "scipy"
+        - "statsmodels"
+        - "matplotlib"
+        - "seaborn"
+
+  - type: "function"
+    name: "get_demand_forecast"
+    description: "Retrieve pre-computed demand forecast features for a product and date range"
+    parameters:
+      type: "object"
+      required: ["material_number", "start_date", "end_date"]
+      properties:
+        material_number:
+          type: "string"
+          description: "SAP material number"
+        plant:
+          type: "string"
+          description: "Plant code (optional, defaults to all plants)"
+        start_date:
+          type: "string"
+          format: "date"
+          description: "Forecast start date (YYYY-MM-DD)"
+        end_date:
+          type: "string"
+          format: "date"
+          description: "Forecast end date (YYYY-MM-DD)"
+        include_features:
+          type: "boolean"
+          default: true
+          description: "Include ML feature columns in response"
+
+  - type: "function"
+    name: "get_product_metrics"
+    description: "Retrieve monthly product performance metrics"
+    parameters:
+      type: "object"
+      required: ["material_number"]
+      properties:
+        material_number:
+          type: "string"
+          description: "SAP material number"
+        months_back:
+          type: "integer"
+          default: 12
+          description: "Number of months of history to retrieve"
+        sales_organization:
+          type: "string"
+          description: "Filter by sales organization"
+
+  - type: "function"
+    name: "detect_demand_anomalies"
+    description: "Identify anomalous demand patterns for a product"
+    parameters:
+      type: "object"
+      required: ["material_number"]
+      properties:
+        material_number:
+          type: "string"
+          description: "SAP material number"
+        sensitivity:
+          type: "number"
+          default: 2.0
+          description: "Anomaly detection threshold (standard deviations)"
+        lookback_days:
+          type: "integer"
+          default: 90
+          description: "Number of days to analyze"
+
+# -- Guardrails --
+guardrails:
+  content_safety:
+    enabled: true
+    categories:
+      hate: "medium"
+      violence: "medium"
+      self_harm: "medium"
+      sexual: "medium"
+
+  grounding:
+    enabled: true
+    blocklist_enabled: false
+    max_hallucination_score: 0.3
+
+  output_validation:
+    enforce_data_citation: true    # Require citing data source in responses
+    max_forecast_horizon_days: 365  # Don't forecast beyond 1 year
+    require_confidence_interval: true  # Must include confidence ranges
+
+# -- Evaluation --
+evaluation:
+  enabled: true
+  metrics:
+    - "groundedness"
+    - "relevance"
+    - "coherence"
+    - "forecast_accuracy_mape"
+  test_dataset: "ai/evaluation/test_sets/demand_forecast_eval.jsonl"
+  schedule: "weekly"
+
+# -- Deployment --
+deployment:
+  auto_scale: true
+  min_instances: 1
+  max_instances: 5
+  target_utilization: 0.7
+  rate_limits:
+    requests_per_minute: 60
+    tokens_per_minute: 80000

@@ -1,0 +1,396 @@
+name: Data Pipeline CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "data-platform/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint notebooks and Python code
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install linting tools
+        run: |
+          pip install --upgrade pip
+          pip install ruff nbqa nbformat mypy
+
+      - name: Lint Python files
+        run: |
+          ruff check data-platform/ --output-format=github
+          ruff format data-platform/ --check
+
+      - name: Lint Jupyter notebooks
+        run: |
+          nbqa ruff data-platform/ --output-format=github
+        continue-on-error: false
+
+      - name: Validate notebook structure
+        run: |
+          python -c "
+          import nbformat
+          import glob
+          import sys
+
+          errors = []
+          for nb_path in glob.glob('data-platform/**/*.ipynb', recursive=True):
+              try:
+                  with open(nb_path, 'r') as f:
+                      nb = nbformat.read(f, as_version=4)
+                  nbformat.validate(nb)
+                  print(f'  OK: {nb_path}')
+              except Exception as e:
+                  errors.append(f'{nb_path}: {e}')
+                  print(f'  FAIL: {nb_path} - {e}')
+
+          if errors:
+              print(f'\n{len(errors)} notebook(s) failed validation')
+              sys.exit(1)
+          "
+
+  # ---------------------------------------------------------------------------
+  # Validate SQL scripts
+  # ---------------------------------------------------------------------------
+  validate-sql:
+    name: Validate SQL
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install SQL validation tools
+        run: |
+          pip install sqlfluff
+
+      - name: Lint SQL files
+        run: |
+          if compgen -G "data-platform/**/*.sql" > /dev/null; then
+            sqlfluff lint data-platform/ \
+              --dialect tsql \
+              --format github-annotation \
+              --ignore parsing
+          else
+            echo "No SQL files found, skipping"
+          fi
+
+      - name: Validate SQL syntax
+        run: |
+          if compgen -G "data-platform/**/*.sql" > /dev/null; then
+            sqlfluff fix data-platform/ \
+              --dialect tsql \
+              --check \
+              --ignore parsing
+          else
+            echo "No SQL files found, skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Run unit tests
+  # ---------------------------------------------------------------------------
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          if [ -f data-platform/requirements.txt ]; then
+            pip install -r data-platform/requirements.txt
+          fi
+          pip install pytest pytest-cov pytest-mock
+
+      - name: Run unit tests
+        run: |
+          if [ -d "data-platform/tests" ]; then
+            pytest data-platform/tests/ \
+              --cov=data-platform \
+              --cov-report=xml:coverage.xml \
+              --cov-report=term-missing \
+              --junitxml=test-results.xml \
+              -v
+          else
+            echo "::warning::No tests directory found at data-platform/tests/"
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            coverage.xml
+            test-results.xml
+
+  # ---------------------------------------------------------------------------
+  # Deploy to Fabric Workspace - Dev
+  # ---------------------------------------------------------------------------
+  deploy-dev:
+    name: Deploy to Fabric (Dev)
+    needs: [lint, validate-sql, test]
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get Fabric access token
+        id: fabric-token
+        run: |
+          TOKEN=$(az account get-access-token \
+            --resource "https://api.fabric.microsoft.com" \
+            --query accessToken -o tsv)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy notebooks to Fabric workspace
+        env:
+          FABRIC_TOKEN: ${{ steps.fabric-token.outputs.token }}
+          WORKSPACE_ID: ${{ secrets.FABRIC_WORKSPACE_ID }}
+        run: |
+          echo "::group::Deploying notebooks to Fabric workspace"
+
+          for notebook in data-platform/notebooks/*.ipynb; do
+            if [ ! -f "$notebook" ]; then
+              echo "No notebooks found, skipping"
+              break
+            fi
+
+            NOTEBOOK_NAME=$(basename "$notebook" .ipynb)
+            echo "Deploying notebook: $NOTEBOOK_NAME"
+
+            # Check if notebook item exists
+            EXISTING=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer $FABRIC_TOKEN" \
+              "https://api.fabric.microsoft.com/v1/workspaces/$WORKSPACE_ID/notebooks?displayName=$NOTEBOOK_NAME")
+
+            CONTENT=$(base64 -w 0 "$notebook")
+
+            if [ "$EXISTING" = "200" ]; then
+              # Update existing notebook via Fabric REST API
+              curl -sf -X PATCH \
+                -H "Authorization: Bearer $FABRIC_TOKEN" \
+                -H "Content-Type: application/json" \
+                "https://api.fabric.microsoft.com/v1/workspaces/$WORKSPACE_ID/notebooks/$NOTEBOOK_NAME" \
+                -d "{
+                  \"displayName\": \"$NOTEBOOK_NAME\",
+                  \"definition\": {
+                    \"parts\": [{
+                      \"path\": \"notebook-content.ipynb\",
+                      \"payload\": \"$CONTENT\",
+                      \"payloadType\": \"InlineBase64\"
+                    }]
+                  }
+                }" && echo "  Updated: $NOTEBOOK_NAME" || echo "::warning::Failed to update $NOTEBOOK_NAME"
+            else
+              # Create new notebook
+              curl -sf -X POST \
+                -H "Authorization: Bearer $FABRIC_TOKEN" \
+                -H "Content-Type: application/json" \
+                "https://api.fabric.microsoft.com/v1/workspaces/$WORKSPACE_ID/notebooks" \
+                -d "{
+                  \"displayName\": \"$NOTEBOOK_NAME\",
+                  \"definition\": {
+                    \"parts\": [{
+                      \"path\": \"notebook-content.ipynb\",
+                      \"payload\": \"$CONTENT\",
+                      \"payloadType\": \"InlineBase64\"
+                    }]
+                  }
+                }" && echo "  Created: $NOTEBOOK_NAME" || echo "::warning::Failed to create $NOTEBOOK_NAME"
+            fi
+          done
+
+          echo "::endgroup::"
+
+      - name: Deploy data pipeline definitions
+        env:
+          FABRIC_TOKEN: ${{ steps.fabric-token.outputs.token }}
+          WORKSPACE_ID: ${{ secrets.FABRIC_WORKSPACE_ID }}
+        run: |
+          echo "::group::Deploying pipeline definitions"
+
+          for pipeline_def in data-platform/pipelines/*.json; do
+            if [ ! -f "$pipeline_def" ]; then
+              echo "No pipeline definitions found, skipping"
+              break
+            fi
+
+            PIPELINE_NAME=$(basename "$pipeline_def" .json)
+            echo "Deploying pipeline: $PIPELINE_NAME"
+
+            CONTENT=$(base64 -w 0 "$pipeline_def")
+
+            curl -sf -X POST \
+              -H "Authorization: Bearer $FABRIC_TOKEN" \
+              -H "Content-Type: application/json" \
+              "https://api.fabric.microsoft.com/v1/workspaces/$WORKSPACE_ID/dataPipelines" \
+              -d "{
+                \"displayName\": \"$PIPELINE_NAME\",
+                \"definition\": {
+                  \"parts\": [{
+                    \"path\": \"pipeline-content.json\",
+                    \"payload\": \"$CONTENT\",
+                    \"payloadType\": \"InlineBase64\"
+                  }]
+                }
+              }" && echo "  Deployed: $PIPELINE_NAME" || echo "::warning::Failed to deploy $PIPELINE_NAME"
+          done
+
+          echo "::endgroup::"
+
+  # ---------------------------------------------------------------------------
+  # Deploy to Fabric Workspace - QA
+  # ---------------------------------------------------------------------------
+  deploy-qa:
+    name: Deploy to Fabric (QA)
+    needs: [deploy-dev]
+    runs-on: ubuntu-latest
+    environment:
+      name: qa
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get Fabric access token
+        id: fabric-token
+        run: |
+          TOKEN=$(az account get-access-token \
+            --resource "https://api.fabric.microsoft.com" \
+            --query accessToken -o tsv)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy via Fabric Deployment Pipeline
+        env:
+          FABRIC_TOKEN: ${{ steps.fabric-token.outputs.token }}
+          DEPLOYMENT_PIPELINE_ID: ${{ secrets.FABRIC_DEPLOYMENT_PIPELINE_ID }}
+        run: |
+          echo "Promoting Dev workspace to QA via Fabric Deployment Pipeline"
+
+          # Trigger deployment pipeline stage promotion (Dev -> QA)
+          curl -sf -X POST \
+            -H "Authorization: Bearer $FABRIC_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.fabric.microsoft.com/v1/deploymentPipelines/$DEPLOYMENT_PIPELINE_ID/deploy" \
+            -d '{
+              "sourceStageOrder": 0,
+              "isBackwardDeployment": false,
+              "note": "Automated promotion from CI/CD - Run #${{ github.run_number }}"
+            }'
+
+          echo "::notice::QA deployment triggered via Fabric Deployment Pipeline"
+
+  # ---------------------------------------------------------------------------
+  # Deploy to Fabric Workspace - Prod (manual approval required)
+  # ---------------------------------------------------------------------------
+  deploy-prod:
+    name: Deploy to Fabric (Prod)
+    needs: [deploy-qa]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'prod' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get Fabric access token
+        id: fabric-token
+        run: |
+          TOKEN=$(az account get-access-token \
+            --resource "https://api.fabric.microsoft.com" \
+            --query accessToken -o tsv)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy via Fabric Deployment Pipeline
+        env:
+          FABRIC_TOKEN: ${{ steps.fabric-token.outputs.token }}
+          DEPLOYMENT_PIPELINE_ID: ${{ secrets.FABRIC_DEPLOYMENT_PIPELINE_ID }}
+        run: |
+          echo "Promoting QA workspace to Prod via Fabric Deployment Pipeline"
+
+          curl -sf -X POST \
+            -H "Authorization: Bearer $FABRIC_TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://api.fabric.microsoft.com/v1/deploymentPipelines/$DEPLOYMENT_PIPELINE_ID/deploy" \
+            -d '{
+              "sourceStageOrder": 1,
+              "isBackwardDeployment": false,
+              "note": "Production promotion - Run #${{ github.run_number }}"
+            }'
+
+          echo "::notice::Prod deployment triggered via Fabric Deployment Pipeline"
+
+      - name: Create release tag
+        run: |
+          git tag "data-prod-v${{ github.run_number }}" "${{ github.sha }}"
+          git push origin "data-prod-v${{ github.run_number }}"

@@ -1,0 +1,266 @@
+# =============================================================================
+# Azure OpenAI Model Deployment Configuration
+# Purpose: Defines model deployments, rate limits, content filters, and
+#          operational settings for all AI models used across the platform.
+# Platform: Azure OpenAI Service via Azure AI Foundry
+# =============================================================================
+
+# -- Azure OpenAI Resource --
+azure_openai:
+  resource_name: "${AZURE_OPENAI_RESOURCE_NAME}"
+  endpoint: "${AZURE_OPENAI_ENDPOINT}"
+  api_version: "2025-04-01-preview"
+  authentication:
+    type: "managed_identity"           # Preferred: no secrets to manage
+    fallback:
+      type: "key_vault"
+      key_vault_uri: "${KEY_VAULT_URI}"
+      secret_name: "azure-openai-api-key"
+
+# -- Model Deployments --
+deployments:
+
+  # Primary reasoning model for complex analysis (demand forecasting agent)
+  gpt-4.1:
+    model_name: "gpt-4.1"
+    model_version: "2025-04-14"
+    deployment_name: "gpt-4-1-demand-forecast"
+    deployment_type: "standard"         # standard | provisioned
+    sku:
+      name: "Standard"
+      capacity: 80                      # Tokens per minute (in thousands)
+    rate_limits:
+      requests_per_minute: 60
+      tokens_per_minute: 80000
+    parameters:
+      default_temperature: 0.1
+      default_max_tokens: 4096
+      default_top_p: 0.95
+      context_window: 1047576           # 1M+ token context window
+    use_cases:
+      - "demand_forecast_agent"
+      - "complex_analytical_queries"
+      - "multi_step_reasoning"
+
+  # Fast multimodal model for conversational analytics (sales insights agent)
+  gpt-4o:
+    model_name: "gpt-4o"
+    model_version: "2025-05-13"
+    deployment_name: "gpt-4o-sales-insights"
+    deployment_type: "standard"
+    sku:
+      name: "Standard"
+      capacity: 150                     # Higher capacity for conversational use
+    rate_limits:
+      requests_per_minute: 120
+      tokens_per_minute: 150000
+    parameters:
+      default_temperature: 0.2
+      default_max_tokens: 4096
+      default_top_p: 0.95
+      context_window: 128000
+    use_cases:
+      - "sales_insights_agent"
+      - "interactive_dashboards"
+      - "report_generation"
+
+  # Cost-efficient model for batch processing and simple tasks
+  gpt-4o-mini:
+    model_name: "gpt-4o-mini"
+    model_version: "2025-07-18"
+    deployment_name: "gpt-4o-mini-batch"
+    deployment_type: "standard"
+    sku:
+      name: "Standard"
+      capacity: 300
+    rate_limits:
+      requests_per_minute: 300
+      tokens_per_minute: 300000
+    parameters:
+      default_temperature: 0.0
+      default_max_tokens: 2048
+      default_top_p: 1.0
+      context_window: 128000
+    use_cases:
+      - "data_classification"
+      - "entity_extraction"
+      - "simple_summarization"
+      - "batch_processing"
+
+  # Embedding model for RAG/vector search
+  text-embedding-3-large:
+    model_name: "text-embedding-3-large"
+    model_version: "1"
+    deployment_name: "text-embedding-3-large-rag"
+    deployment_type: "standard"
+    sku:
+      name: "Standard"
+      capacity: 350
+    rate_limits:
+      requests_per_minute: 720
+      tokens_per_minute: 350000
+    parameters:
+      dimensions: 1536                  # Can be 256, 1024, or 3072
+      encoding_format: "float"
+    use_cases:
+      - "product_catalog_indexing"
+      - "document_embedding"
+      - "semantic_search"
+      - "rag_retrieval"
+
+# -- Content Filters --
+content_filters:
+  default_filter:
+    name: "production-content-filter"
+    description: "Standard content filter for production workloads"
+    filters:
+      hate:
+        severity_threshold: "medium"
+        action: "block"
+      violence:
+        severity_threshold: "medium"
+        action: "block"
+      self_harm:
+        severity_threshold: "medium"
+        action: "block"
+      sexual:
+        severity_threshold: "medium"
+        action: "block"
+      profanity:
+        action: "block"
+    custom_blocklists:
+      - name: "competitor-names"
+        description: "Block generation of competitor company names"
+        enabled: true
+      - name: "pii-patterns"
+        description: "Block generation of PII patterns (SSN, credit cards)"
+        enabled: true
+    jailbreak_detection:
+      enabled: true
+      action: "block"
+    indirect_prompt_injection:
+      enabled: true
+      action: "log_and_warn"
+
+  relaxed_filter:
+    name: "dev-content-filter"
+    description: "Relaxed filter for development and testing"
+    filters:
+      hate:
+        severity_threshold: "high"
+        action: "warn"
+      violence:
+        severity_threshold: "high"
+        action: "warn"
+      self_harm:
+        severity_threshold: "high"
+        action: "warn"
+      sexual:
+        severity_threshold: "high"
+        action: "warn"
+    jailbreak_detection:
+      enabled: true
+      action: "log"
+
+# -- Routing and Fallback Configuration --
+routing:
+  primary_region: "eastus2"
+  fallback_regions:
+    - "westus3"
+    - "northcentralus"
+
+  model_routing_rules:
+    # Route based on estimated token count
+    - condition: "estimated_tokens < 2000"
+      preferred_model: "gpt-4o-mini"
+      description: "Route small requests to cost-efficient model"
+    - condition: "requires_deep_reasoning == true"
+      preferred_model: "gpt-4.1"
+      description: "Route complex analysis to advanced reasoning model"
+    - condition: "is_interactive == true"
+      preferred_model: "gpt-4o"
+      description: "Route conversational requests to fast model"
+
+  retry_policy:
+    max_retries: 3
+    base_delay_ms: 1000
+    max_delay_ms: 30000
+    backoff_multiplier: 2.0
+    retry_on_status_codes:
+      - 429   # Rate limited
+      - 500   # Internal server error
+      - 503   # Service unavailable
+
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5              # Open circuit after 5 consecutive failures
+    recovery_timeout_seconds: 60       # Try again after 60 seconds
+    half_open_max_requests: 3          # Allow 3 test requests in half-open state
+
+# -- Cost Management --
+cost_management:
+  budget:
+    monthly_limit_usd: 5000
+    alert_thresholds:
+      - percentage: 50
+        action: "email_notification"
+      - percentage: 80
+        action: "email_and_teams_notification"
+      - percentage: 95
+        action: "throttle_non_critical"
+      - percentage: 100
+        action: "block_non_critical"
+
+  tracking:
+    enabled: true
+    log_all_requests: true
+    attributes:
+      - "deployment_name"
+      - "agent_name"
+      - "prompt_tokens"
+      - "completion_tokens"
+      - "total_tokens"
+      - "estimated_cost_usd"
+    export_to: "log_analytics"
+
+  optimization:
+    prompt_caching:
+      enabled: true
+      ttl_seconds: 3600
+    response_caching:
+      enabled: true
+      ttl_seconds: 300
+      cache_key_strategy: "semantic_hash"    # Cache semantically similar queries
+
+# -- Monitoring --
+monitoring:
+  metrics:
+    - name: "request_latency_ms"
+      type: "histogram"
+      buckets: [100, 250, 500, 1000, 2500, 5000, 10000]
+    - name: "tokens_used"
+      type: "counter"
+      labels: ["deployment", "agent", "direction"]
+    - name: "request_count"
+      type: "counter"
+      labels: ["deployment", "status_code"]
+    - name: "content_filter_blocks"
+      type: "counter"
+      labels: ["filter_category", "severity"]
+
+  alerting:
+    - name: "high_latency"
+      condition: "p95_latency > 5000ms"
+      action: "teams_notification"
+    - name: "high_error_rate"
+      condition: "error_rate > 5%"
+      window: "5m"
+      action: "pagerduty"
+    - name: "rate_limit_approaching"
+      condition: "utilization > 80%"
+      action: "email_notification"
+
+  application_insights:
+    connection_string: "${APPINSIGHTS_CONNECTION_STRING}"
+    enabled: true
+    sample_rate: 1.0                   # Log 100% of requests in production

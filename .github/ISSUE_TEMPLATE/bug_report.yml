@@ -1,0 +1,128 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in the Azure Data Platform
+title: "[Bug]: "
+labels: ["bug", "triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this bug. Please fill out the information below to help us investigate and resolve the issue quickly.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      description: Which part of the platform is affected?
+      multiple: true
+      options:
+        - Infrastructure (Bicep/ARM)
+        - Microsoft Fabric (Lakehouse)
+        - Microsoft Fabric (Data Pipelines)
+        - Microsoft Fabric (Notebooks)
+        - Microsoft Purview
+        - AI Foundry
+        - PostgreSQL / pgvector
+        - Streamlit Admin App
+        - React Web App
+        - CI/CD Pipelines
+        - Networking / Connectivity
+        - Authentication / Authorization
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      description: Which environment does this occur in?
+      multiple: true
+      options:
+        - Dev
+        - QA
+        - Prod
+        - Local Development
+        - CI/CD
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: How severe is this bug?
+      options:
+        - "Critical - Production down or data loss"
+        - "High - Major feature broken, no workaround"
+        - "Medium - Feature broken but workaround exists"
+        - "Low - Minor issue, cosmetic, or edge case"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe what happened...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro-steps
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the behavior.
+      placeholder: |
+        1. Go to '...'
+        2. Run command '...'
+        3. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened? Include error messages, screenshots, or logs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs / Error Messages
+      description: Paste any relevant log output or error messages. This will be formatted as code.
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: |
+        Add any other context about the problem. For example:
+        - When did this start happening?
+        - Was there a recent deployment?
+        - Related Azure resource IDs (sanitize any secrets)
+        - Screenshots or screen recordings
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues to ensure this is not a duplicate
+          required: true
+        - label: I have removed any sensitive information (keys, connection strings, etc.)
+          required: true
+        - label: I have included relevant log output or error messages
+          required: false

@@ -1,0 +1,346 @@
+name: PR Validation Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+  BICEP_VERSION: "0.30.x"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Detect which areas of the codebase changed
+  # ---------------------------------------------------------------------------
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      infra: ${{ steps.filter.outputs.infra }}
+      python: ${{ steps.filter.outputs.python }}
+      react: ${{ steps.filter.outputs.react }}
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            infra:
+              - 'infra/**'
+            python:
+              - '**/*.py'
+              - '**/*.ipynb'
+              - 'data-platform/**'
+              - 'apps/streamlit-admin/**'
+            react:
+              - 'apps/react-webapp/**'
+            docker:
+              - '**/Dockerfile'
+              - '**/.dockerignore'
+
+  # ---------------------------------------------------------------------------
+  # Bicep lint and validation
+  # ---------------------------------------------------------------------------
+  bicep-lint:
+    name: Bicep Lint
+    needs: changes
+    if: ${{ needs.changes.outputs.infra == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bicep CLI
+        uses: azure/setup-bicep@v0.3.0
+        with:
+          version: ${{ env.BICEP_VERSION }}
+
+      - name: Lint Bicep files
+        run: |
+          echo "## Bicep Lint Results" >> "$GITHUB_STEP_SUMMARY"
+          ERRORS=0
+          while IFS= read -r file; do
+            if az bicep build --file "$file" --stdout > /dev/null 2>&1; then
+              echo "- :white_check_mark: \`$file\`" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- :x: \`$file\`" >> "$GITHUB_STEP_SUMMARY"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done < <(find infra -name '*.bicep' -type f)
+
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "::error::$ERRORS Bicep file(s) failed linting"
+            exit 1
+          fi
+
+      - name: Check Bicep formatting
+        run: |
+          UNFORMATTED=()
+          while IFS= read -r file; do
+            if ! az bicep format --file "$file" --check 2>/dev/null; then
+              UNFORMATTED+=("$file")
+            fi
+          done < <(find infra -name '*.bicep' -type f)
+
+          if [ ${#UNFORMATTED[@]} -gt 0 ]; then
+            echo "::warning::The following files need formatting:"
+            printf '  %s\n' "${UNFORMATTED[@]}"
+            echo "Run 'az bicep format --file <file>' to fix"
+          fi
+
+      - name: Check for hardcoded values
+        run: |
+          echo "Checking for hardcoded subscription IDs, secrets, or keys..."
+          PATTERNS=(
+            '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+            'password\s*[:=]\s*["\x27][^"\x27]+'
+            'secret\s*[:=]\s*["\x27][^"\x27]+'
+          )
+          FOUND=0
+          for pattern in "${PATTERNS[@]}"; do
+            if grep -rEn "$pattern" infra/ --include='*.bicep' | grep -v 'subscriptionId()' | grep -v '@secure()' | grep -v 'uniqueString' | grep -v '00000000-0000-0000-0000-000000000000'; then
+              FOUND=1
+            fi
+          done
+          if [ "$FOUND" -eq 1 ]; then
+            echo "::warning::Potential hardcoded values detected in Bicep files. Review the matches above."
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Python lint and tests
+  # ---------------------------------------------------------------------------
+  python-lint:
+    name: Python Lint & Test
+    needs: changes
+    if: ${{ needs.changes.outputs.python == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install tools
+        run: |
+          pip install --upgrade pip
+          pip install ruff nbqa bandit
+
+      - name: Ruff lint
+        run: |
+          ruff check . --output-format=github
+
+      - name: Ruff format check
+        run: |
+          ruff format . --check --diff
+
+      - name: Lint notebooks
+        run: |
+          if compgen -G "**/*.ipynb" > /dev/null 2>&1; then
+            nbqa ruff . --output-format=github
+          else
+            echo "No notebooks found, skipping"
+          fi
+
+      - name: Security scan (bandit)
+        run: |
+          bandit -r . \
+            --exclude ./.venv,./node_modules,./.git \
+            --format json \
+            --output bandit-results.json \
+            -ll \
+            || true
+          # Display results
+          bandit -r . \
+            --exclude ./.venv,./node_modules,./.git \
+            -ll \
+            || echo "::warning::Bandit found potential security issues"
+
+      - name: Run Python tests
+        run: |
+          # Install project dependencies if requirements files exist
+          for req in $(find . -name 'requirements*.txt' -not -path '*/node_modules/*' -not -path '*/.venv/*'); do
+            pip install -r "$req" 2>/dev/null || true
+          done
+          pip install pytest pytest-cov
+
+          if find . -name 'test_*.py' -o -name '*_test.py' | grep -q .; then
+            pytest --tb=short --co -q 2>/dev/null && pytest --tb=short -v || echo "::warning::Some tests failed"
+          else
+            echo "No test files found, skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # React lint and tests
+  # ---------------------------------------------------------------------------
+  react-lint:
+    name: React Lint & Test
+    needs: changes
+    if: ${{ needs.changes.outputs.react == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: apps/react-webapp/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/react-webapp
+        run: npm ci
+
+      - name: ESLint
+        working-directory: apps/react-webapp
+        run: npm run lint
+
+      - name: TypeScript check
+        working-directory: apps/react-webapp
+        run: |
+          if grep -q '"tsc"' package.json || grep -q 'typescript' package.json; then
+            npx tsc --noEmit
+          else
+            echo "TypeScript not configured, skipping"
+          fi
+
+      - name: Run tests
+        working-directory: apps/react-webapp
+        run: npm test -- --passWithNoTests --ci --coverage
+        env:
+          CI: true
+
+      - name: Build check
+        working-directory: apps/react-webapp
+        run: npm run build
+        env:
+          CI: true
+
+  # ---------------------------------------------------------------------------
+  # Security scan with Trivy
+  # ---------------------------------------------------------------------------
+  security-scan:
+    name: Security Scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          format: "table"
+          exit-code: "0"
+          severity: "CRITICAL,HIGH"
+          output: "trivy-fs-results.txt"
+
+      - name: Run Trivy config scan (IaC)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "config"
+          scan-ref: "."
+          format: "table"
+          exit-code: "0"
+          severity: "CRITICAL,HIGH,MEDIUM"
+          output: "trivy-config-results.txt"
+
+      - name: Run Trivy secret scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          format: "table"
+          exit-code: "1"
+          scanners: "secret"
+          output: "trivy-secret-results.txt"
+
+      - name: Upload Trivy results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results
+          path: trivy-*.txt
+
+      - name: Post scan summary
+        if: always()
+        run: |
+          echo "## Security Scan Results" >> "$GITHUB_STEP_SUMMARY"
+
+          echo "### Filesystem Vulnerabilities" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat trivy-fs-results.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "No results" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          echo "### IaC Configuration Issues" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat trivy-config-results.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "No results" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          echo "### Secret Detection" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat trivy-secret-results.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "No results" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Scan Dockerfiles if changed
+  # ---------------------------------------------------------------------------
+  dockerfile-lint:
+    name: Dockerfile Lint
+    needs: changes
+    if: ${{ needs.changes.outputs.docker == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Lint Dockerfiles with Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          recursive: true
+          failure-threshold: warning
+
+  # ---------------------------------------------------------------------------
+  # Summary comment on PR
+  # ---------------------------------------------------------------------------
+  summary:
+    name: PR Summary
+    needs: [bicep-lint, python-lint, react-lint, security-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post check summary
+        run: |
+          echo "## PR Check Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Check | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Bicep Lint | ${{ needs.bicep-lint.result || 'skipped' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Python Lint | ${{ needs.python-lint.result || 'skipped' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| React Lint | ${{ needs.react-lint.result || 'skipped' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Security Scan | ${{ needs.security-scan.result || 'skipped' }} |" >> "$GITHUB_STEP_SUMMARY"

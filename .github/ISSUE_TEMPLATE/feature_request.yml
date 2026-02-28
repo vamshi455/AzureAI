@@ -1,0 +1,129 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for the Azure Data Platform
+title: "[Feature]: "
+labels: ["enhancement"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a feature! Please provide as much detail as possible to help us evaluate and prioritize this request.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Target Component
+      description: Which part of the platform does this relate to?
+      multiple: true
+      options:
+        - Infrastructure (Bicep/ARM)
+        - Microsoft Fabric (Lakehouse)
+        - Microsoft Fabric (Data Pipelines)
+        - Microsoft Fabric (Notebooks)
+        - Microsoft Purview (Data Governance)
+        - AI Foundry (AI/ML)
+        - PostgreSQL / pgvector (Vector DB)
+        - Streamlit Admin App
+        - React Web App
+        - CI/CD Pipelines
+        - Security / Compliance
+        - Monitoring / Alerting
+        - Documentation
+        - New Component
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Feature Category
+      description: What type of feature is this?
+      options:
+        - New capability
+        - Enhancement to existing feature
+        - Performance improvement
+        - Developer experience
+        - Security hardening
+        - Cost optimization
+        - Automation
+        - Integration
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Suggested Priority
+      description: How important do you think this feature is?
+      options:
+        - "High - Blocks current work or critical for upcoming milestone"
+        - "Medium - Important but not blocking"
+        - "Low - Nice to have"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? What pain point or gap exists today?
+      placeholder: |
+        As a [role], I need [capability] so that [benefit].
+        Currently, we have to [workaround or manual process]...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe your proposed solution. How should this work?
+      placeholder: |
+        The solution should...
+        - Implement X functionality
+        - Integrate with Y service
+        - Provide Z user experience
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other approaches did you consider? Why were they not suitable?
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: How will we know this feature is complete? What are the success criteria?
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+        - [ ] Criterion 3
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact Assessment
+      description: |
+        What is the expected impact of this feature?
+        Consider: affected environments, downstream dependencies, data migration needs, cost implications.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other context, mockups, references, or related issues.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues and feature requests to avoid duplicates
+          required: true
+        - label: I have considered the security and compliance implications
+          required: false
+        - label: I have considered the cost implications
+          required: false

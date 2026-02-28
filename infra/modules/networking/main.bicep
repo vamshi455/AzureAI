@@ -591,6 +591,18 @@ resource privateDnsZoneOpenAI 'Microsoft.Network/privateDnsZones@2024-06-01' = {
   tags: tags
 }
 
+resource privateDnsZoneBlob 'Microsoft.Network/privateDnsZones@2024-06-01' = {
+  name: 'privatelink.blob.core.windows.net'
+  location: 'global'
+  tags: tags
+}
+
+resource privateDnsZoneDfs 'Microsoft.Network/privateDnsZones@2024-06-01' = {
+  name: 'privatelink.dfs.core.windows.net'
+  location: 'global'
+  tags: tags
+}
+
 // ============================================================================
 // Private DNS Zone VNet Links
 // ============================================================================
@@ -673,6 +685,32 @@ resource dnsLinkOpenAI 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@20
   }
 }
 
+resource dnsLinkBlob 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
+  parent: privateDnsZoneBlob
+  name: 'link-${spokeVnetName}'
+  location: 'global'
+  tags: tags
+  properties: {
+    virtualNetwork: {
+      id: spokeVnet.id
+    }
+    registrationEnabled: false
+  }
+}
+
+resource dnsLinkDfs 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
+  parent: privateDnsZoneDfs
+  name: 'link-${spokeVnetName}'
+  location: 'global'
+  tags: tags
+  properties: {
+    virtualNetwork: {
+      id: spokeVnet.id
+    }
+    registrationEnabled: false
+  }
+}
+
 // ============================================================================
 // Outputs
 // ============================================================================
@@ -694,3 +732,5 @@ output webAppsPrivateDnsZoneId string = privateDnsZoneWebApps.id
 output purviewPrivateDnsZoneId string = privateDnsZonePurview.id
 output cognitiveServicesPrivateDnsZoneId string = privateDnsZoneCognitiveServices.id
 output openAIPrivateDnsZoneId string = privateDnsZoneOpenAI.id
+output blobPrivateDnsZoneId string = privateDnsZoneBlob.id
+output dfsPrivateDnsZoneId string = privateDnsZoneDfs.id

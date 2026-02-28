@@ -101,6 +101,10 @@ param enablePurview bool = true
 @description('Enable AI Foundry deployment.')
 param enableAIFoundry bool = true
 
+// --- Storage (Lakehouse) Parameters ---
+@description('Enable ADLS Gen2 Lakehouse deployment.')
+param enableStorage bool = true
+
 // --- Plane (Ticketing) Parameters ---
 @description('Enable Plane ticketing system deployment.')
 param enablePlane bool = false
@@ -271,6 +275,24 @@ module fabric 'modules/fabric/main.bicep' = if (enableFabric) {
   }
 }
 
+// --- Storage (Lakehouse) ---
+module storage 'modules/storage/main.bicep' = if (enableStorage) {
+  scope: rg
+  name: 'storage-${environment}'
+  params: {
+    location: location
+    environment: environment
+    resourcePrefix: resourcePrefix
+    tags: tags
+    dataIngestionIdentityPrincipalId: identity.outputs.dataIngestionIdentityPrincipalId
+    appServiceIdentityPrincipalId: identity.outputs.appServiceIdentityPrincipalId
+    privateEndpointSubnetId: networking.outputs.privateEndpointSubnetId
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
+    blobPrivateDnsZoneId: networking.outputs.blobPrivateDnsZoneId
+    dfsPrivateDnsZoneId: networking.outputs.dfsPrivateDnsZoneId
+  }
+}
+
 // --- Purview ---
 module purview 'modules/purview/main.bicep' = if (enablePurview) {
   scope: rg
@@ -313,3 +335,5 @@ output keyVaultUri string = keyvault.outputs.keyVaultUri
 output postgresqlFqdn string = enablePostgresql ? postgresql.outputs.fqdn : 'not-deployed'
 output platformIdentityId string = identity.outputs.platformIdentityId
 output platformIdentityClientId string = identity.outputs.platformIdentityClientId
+output lakehouseStorageAccountName string = enableStorage ? storage.outputs.storageAccountName : 'not-deployed'
+output lakehouseDfsEndpoint string = enableStorage ? storage.outputs.primaryDfsEndpoint : 'not-deployed'

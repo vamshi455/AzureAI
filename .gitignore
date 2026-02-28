@@ -4,6 +4,11 @@
 # =============================================================================
 
 # -----------------------------------------------------------------------------
+# Generated / Output Data (synthetic data, compiled templates)
+# -----------------------------------------------------------------------------
+data-platform/synthetic-data/output/
+
+# -----------------------------------------------------------------------------
 # Python
 # -----------------------------------------------------------------------------
 __pycache__/
@@ -105,6 +110,7 @@ storybook-static/
 # Compiled ARM templates (Bicep generates these)
 *.json
 !infra/**/*.json
+infra/main.json
 !.github/**/*.json
 !apps/**/package.json
 !apps/**/package-lock.json

@@ -42,6 +42,9 @@ param enablePurview = true
 // --- AI Foundry ---
 param enableAIFoundry = true
 
+// --- Storage (Lakehouse) ---
+param enableStorage = true
+
 // --- Plane (Ticketing) ---
 param enablePlane = false
 param planeImageTag = 'latest'

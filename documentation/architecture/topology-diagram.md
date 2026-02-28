@@ -37,14 +37,14 @@
 │  │  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘              │  │  │
 │  │  │                                                                     │  │  │
 │  │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐              │  │  │
-│  │  │  │POSTGRESQL│ │  FABRIC  │ │APP SERVC │ │AI FOUNDRY│              │  │  │
-│  │  │  │ ⏸ Skip  │ │  ⏸ Skip │ │  ⏸ Skip │ │  ⏸ Skip │              │  │  │
-│  │  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘              │  │  │
-│  │  │                                                                     │  │  │
-│  │  │  ┌──────────┐ ┌──────────┐                                        │  │  │
-│  │  │  │ PURVIEW  │ │  PLANE   │                                        │  │  │
-│  │  │  │ ⏸ Skip  │ │  ⏸ Skip │                                        │  │  │
-│  │  │  └──────────┘ └──────────┘                                        │  │  │
+│  │  │  │ STORAGE  │ │POSTGRESQL│ │  FABRIC  │ │APP SERVC │              │  │  │
+│  │  │  │ (ADLS v2)│ │ ⏸ Skip  │ │  ⏸ Skip │ │  ⏸ Skip │              │  │  │
+│  │  │  │  ✅ Live │ └──────────┘ └──────────┘ └──────────┘              │  │  │
+│  │  │  └──────────┘                                                      │  │  │
+│  │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐                          │  │  │
+│  │  │  │AI FOUNDRY│ │ PURVIEW  │ │  PLANE   │                          │  │  │
+│  │  │  │  ⏸ Skip │ │ ⏸ Skip  │ │  ⏸ Skip │                          │  │  │
+│  │  │  └──────────┘ └──────────┘ └──────────┘                          │  │  │
 │  │  └─────────────────────────────────────────────────────────────────────┘  │  │
 │  └───────────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -81,7 +81,13 @@
           │  │ Bastion    │  │       │  │ ┌────────┐ │  │
           │  │ Subnet     │  │       │  │ │PE: KV  │ │  │
           │  │10.0.2.0/26 │  │       │  │ │(active)│ │  │
-          │  └────────────┘  │       │  │ └────────┘ │  │
+          │  └────────────┘  │       │  │ ├────────┤ │  │
+          │                  │       │  │ │PE:Blob │ │  │
+          │                  │       │  │ │(active)│ │  │
+          │                  │       │  │ ├────────┤ │  │
+          │                  │       │  │ │PE:DFS  │ │  │
+          │                  │       │  │ │(active)│ │  │
+          │                  │       │  │ └────────┘ │  │
           │                  │       │  └────────────┘  │
           └──────────────────┘       │                  │
                                      │  ┌────────────┐  │
@@ -111,10 +117,12 @@
                                      └──────────────────┘
 
      ┌──────────────────────────────────────────────────────┐
-     │              PRIVATE DNS ZONES (6 zones)             │
+     │              PRIVATE DNS ZONES (8 zones)             │
      │  All linked to dp-vnet-spoke-dev                     │
      │                                                      │
      │  ● privatelink.vaultcore.azure.net      → Key Vault  │
+     │  ● privatelink.blob.core.windows.net   → Blob Store │
+     │  ● privatelink.dfs.core.windows.net    → ADLS DFS   │
      │  ● privatelink.postgres.database...     → PostgreSQL │
      │  ● privatelink.azurewebsites.net        → App Svc   │
      │  ● privatelink.purview.azure.com        → Purview   │
@@ -173,6 +181,24 @@ dp-rg-dev (Resource Group)
 │   └── dp-pe-kv-dev                  Private Endpoint
 │       └── DNS: privatelink.vaultcore.azure.net
 │
+├── STORAGE (ADLS Gen2 LAKEHOUSE) ──────────────────────────
+│   ├── dpstlakedev*               Storage Account (HNS enabled)
+│   │   ├── Container: bronze      Raw data (Parquet)
+│   │   │   ├── erp_sap/           SAP SD: vbak, vbap, kna1, mara, mard...
+│   │   │   ├── crm_salesforce/    Salesforce: accounts, contacts, opps...
+│   │   │   └── iot/telemetry/     IoT sensor readings
+│   │   ├── Container: silver      Cleaned, deduped (future)
+│   │   ├── Container: gold        Star schema, KPIs (future)
+│   │   ├── Container: rag-documents
+│   │   │   ├── product-catalog/   JSON + CSV for RAG indexing
+│   │   │   └── customer-profiles/ Markdown for RAG indexing
+│   │   ├── Public Access: Enabled (dev), Disabled (prod)
+│   │   └── Diagnostic Settings → dp-log-dev
+│   ├── dp-pe-blob-dev             Private Endpoint (blob)
+│   │   └── DNS: privatelink.blob.core.windows.net
+│   └── dp-pe-dfs-dev              Private Endpoint (DFS)
+│       └── DNS: privatelink.dfs.core.windows.net
+│
 ├── POSTGRESQL (⏸ not deployed) ─────────────────────────────
 │   └── Enable with: enablePostgresql=true (~$50/mo)
 │
@@ -197,29 +223,35 @@ dp-rg-dev (Resource Group)
 ## Data Flow Architecture (Target State)
 
 ```
-  DATA SOURCES                    FABRIC LAKEHOUSE                    CONSUMERS
- ─────────────                   ─────────────────                   ──────────
+  DATA SOURCES               ADLS GEN2 LAKEHOUSE (LIVE)               CONSUMERS
+ ─────────────              ──────────────────────────               ──────────
 
  ┌───────────┐     ┌─────────────────────────────────────────┐    ┌───────────┐
- │  SAP/ERP  │────►│                                         │    │  Power BI │
- │  (Sales,  │     │  ┌─────────┐  ┌─────────┐  ┌────────┐  │    │  Reports  │
- │  Inventory)│     │  │ BRONZE  │  │ SILVER  │  │  GOLD  │  │───►│ (Direct   │
- └───────────┘     │  │         │  │         │  │        │  │    │  Lake)    │
-                   │  │Raw data,│  │Cleaned, │  │Star    │  │    └───────────┘
- ┌───────────┐     │  │schema on│─►│deduped, │─►│schema, │  │
- │  CRM /    │────►│  │read,    │  │SCD2,    │  │KPIs,   │  │    ┌───────────┐
- │  Dynamics │     │  │audit log│  │DQ checks│  │ML feat.│  │    │ Streamlit │
- └───────────┘     │  └─────────┘  └─────────┘  └───┬────┘  │    │  Admin    │
-                   │                                 │       │───►│  Portal   │
- ┌───────────┐     │                                 │       │    └───────────┘
- │  IoT      │────►│  Bronze Tables:    Silver:      │       │
- │  Sensors  │     │  raw_sales_orders  cleaned_     │       │    ┌───────────┐
- └───────────┘     │  raw_inventory     sales_orders │       │    │ React     │
-                   │  raw_iot_telemetry cleaned_     │       │───►│ Web App   │
- ┌───────────┐     │  raw_customers     inventory    │       │    │ (AI Chat) │
- │  POS      │────►│                    cleaned_     │       │    └───────────┘
- │  Systems  │     │                    customers    │       │
- └───────────┘     └─────────────────────────────────┘       │
+ │ SAP S/4   │────►│           dpstlakedev*                  │    │  Power BI │
+ │ (9 tables:│     │  ┌─────────┐  ┌─────────┐  ┌────────┐  │    │  Reports  │
+ │ VBAK,VBAP,│     │  │ BRONZE  │  │ SILVER  │  │  GOLD  │  │───►│ (Direct   │
+ │ KNA1,MARA,│     │  │         │  │         │  │        │  │    │  Lake)    │
+ │ MARD,VBRK,│     │  │Parquet  │  │Cleaned, │  │Star    │  │    └───────────┘
+ │ VBRP,LIKP,│     │  │files per│─►│deduped, │─►│schema, │  │
+ │ LIPS)     │     │  │source   │  │SCD2,    │  │KPIs,   │  │    ┌───────────┐
+ └───────────┘     │  │system   │  │DQ checks│  │ML feat.│  │    │ Streamlit │
+                   │  └─────────┘  └─────────┘  └───┬────┘  │    │  Admin    │
+ ┌───────────┐     │                                 │       │───►│  Portal   │
+ │ Salesforce│────►│  bronze/          bronze/        │       │    └───────────┘
+ │ CRM       │     │  erp_sap/         crm_salesforce/│       │
+ │ (7 objects:│     │  ├─vbak/          ├─accounts/   │       │    ┌───────────┐
+ │ Accounts, │     │  ├─vbap/          ├─contacts/   │       │    │ React     │
+ │ Contacts, │     │  ├─kna1/          ├─opportunities│       │───►│ Web App   │
+ │ Opps...)  │     │  ├─mara/          ├─leads/      │       │    │ (AI Chat) │
+ └───────────┘     │  └─...            └─...         │       │    └───────────┘
+                   │                                  │       │
+ ┌───────────┐     │  ┌──────────────────────────┐    │       │
+ │  IoT      │────►│  │ RAG-DOCUMENTS container  │    │       │
+ │  Sensors  │     │  │ product-catalog/ (JSON)   │    │       │
+ └───────────┘     │  │ customer-profiles/ (MD)   │    │       │
+                   │  │ catalog_master.csv        │    │       │
+                   │  └──────────────────────────┘    │       │
+                   └──────────────────────────────────┘       │
                                                               │
                    ┌──────────────────────────────────────────┘
                    │
@@ -341,10 +373,11 @@ dp-rg-dev (Resource Group)
 │ Fabric         │ F2 (⏸ skip)      │ F4               │ F64             │
 │ App Service    │ B2 (⏸ skip)      │ S2               │ P2v3 + slots    │
 ├────────────────┼──────────────────┼──────────────────┼──────────────────┤
+│ Storage(ADLS)  │ ✅ LRS, pub acc  │ ✅ GRS           │ ✅ GRS, no pub  │
 │ Key Vault      │ ✅ No purge prot │ ✅ No purge prot │ ✅ Purge protect│
 │ Monitoring     │ ✅ 30d retention │ ✅ 30d retention │ ✅ 90d retention│
 │ Networking     │ ✅ Hub + Spoke   │ ✅ Hub + Spoke   │ ✅ Hub + Spoke  │
-│ Identity       │ ✅ 3 MI + RBAC  │ ✅ 3 MI + RBAC  │ ✅ 3 MI + RBAC  │
+│ Identity       │ ✅ 3 MI + RBAC  │ ✅ 3 MI + RBAC  │ ✅ 3 MI + RBAC │
 ├────────────────┼──────────────────┼──────────────────┼──────────────────┤
 │ Classification │ Internal         │ Confidential     │ Highly Confident.│
 │ Est. Cost/mo   │ ~$5-10 (current) │ ~$400-600        │ ~$2,000-3,000   │
@@ -356,11 +389,11 @@ dp-rg-dev (Resource Group)
 ## Quick Reference - Enable Resources
 
 ```bash
-# Current deployment (core only, ~$5-10/mo):
+# Current deployment (core + storage, ~$5-15/mo):
 az deployment sub create --location eastus2 --template-file infra/main.bicep \
   --parameters environment='dev' keyVaultAdminObjectId='b8f43d7c-...' \
-  enableFabric=false enableAppService=false enablePostgresql=false \
-  enablePurview=false enableAIFoundry=false enablePlane=false
+  enableStorage=true enableFabric=false enableAppService=false \
+  enablePostgresql=false enablePurview=false enableAIFoundry=false enablePlane=false
 
 # Add PostgreSQL (+~$50/mo):
 #   enablePostgresql=true postgresAdminLogin=pgadmin postgresAdminPassword='...'
@@ -379,4 +412,10 @@ az deployment sub create --location eastus2 --template-file infra/main.bicep \
 
 # Add Plane ticketing (+~$30/mo):
 #   enablePlane=true planePostgresPassword='...'
+
+# Upload synthetic data to lakehouse:
+#   cd data-platform/synthetic-data
+#   python -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+#   python generate_all.py --upload
 ```

@@ -26,9 +26,6 @@ param platformIdentityPrincipalId string
 @description('Subnet ID for the private endpoint.')
 param privateEndpointSubnetId string
 
-@description('VNet ID for private DNS zone link.')
-param vnetId string
-
 @description('Log Analytics Workspace ID for diagnostic settings.')
 param logAnalyticsWorkspaceId string
 

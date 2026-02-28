@@ -149,7 +149,6 @@ resource savedQueryErrors 'Microsoft.OperationalInsights/workspaces/savedSearche
   parent: logAnalyticsWorkspace
   name: 'DataPlatformErrors'
   properties: {
-    etag: '*'
     displayName: 'Data Platform - All Errors'
     category: 'Data Platform'
     query: 'AzureDiagnostics | where Level == "Error" | project TimeGenerated, ResourceType, Resource, OperationName, ResultDescription | order by TimeGenerated desc'
@@ -161,7 +160,6 @@ resource savedQueryPostgres 'Microsoft.OperationalInsights/workspaces/savedSearc
   parent: logAnalyticsWorkspace
   name: 'PostgreSQLSlowQueries'
   properties: {
-    etag: '*'
     displayName: 'PostgreSQL - Slow Queries'
     category: 'Data Platform'
     query: 'AzureDiagnostics | where ResourceType == "FLEXIBLESERVERS" | where Category == "PostgreSQLLogs" | where Message contains "duration" | project TimeGenerated, Resource, Message | order by TimeGenerated desc'
@@ -173,7 +171,6 @@ resource savedQueryKeyVault 'Microsoft.OperationalInsights/workspaces/savedSearc
   parent: logAnalyticsWorkspace
   name: 'KeyVaultOperations'
   properties: {
-    etag: '*'
     displayName: 'Key Vault - Access Operations'
     category: 'Data Platform'
     query: 'AzureDiagnostics | where ResourceType == "VAULTS" | project TimeGenerated, OperationName, ResultType, CallerIPAddress, identity_claim_upn_s | order by TimeGenerated desc'

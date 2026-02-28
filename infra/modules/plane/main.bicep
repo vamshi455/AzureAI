@@ -43,6 +43,10 @@ param containerCpu string = '0.5'
 @description('Memory allocation for the container.')
 param containerMemory string = '1Gi'
 
+@description('PostgreSQL administrator password for Plane database.')
+@secure()
+param planePostgresPassword string
+
 // ============================================================================
 // Variables
 // ============================================================================
@@ -68,7 +72,7 @@ resource planePostgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = 
   properties: {
     version: '16'
     administratorLogin: 'planeadmin'
-    administratorLoginPassword: 'CHANGE_ME_IN_KEYVAULT' // Should be overridden via Key Vault reference
+    administratorLoginPassword: planePostgresPassword
     storage: {
       storageSizeGB: environment == 'prod' ? 128 : 32
       autoGrow: 'Enabled'

@@ -20,9 +20,6 @@ param tags object
 @description('Subnet ID for private endpoints.')
 param privateEndpointSubnetId string
 
-@description('VNet ID for private DNS zone link.')
-param vnetId string
-
 @description('Log Analytics Workspace ID for diagnostic settings.')
 param logAnalyticsWorkspaceId string
 
@@ -128,10 +125,10 @@ resource aiHub 'Microsoft.MachineLearningServices/workspaces@2024-10-01' = {
   properties: {
     friendlyName: 'Manufacturing & Sales AI Hub (${toUpper(environment)})'
     description: 'AI Foundry hub for Manufacturing and Sales Data Platform - ${toUpper(environment)}'
-    keyVaultId: keyVaultId
-    storageAccountId: storageAccount.id
-    containerRegistryId: containerRegistry.id
-    applicationInsightsId: applicationInsightsId
+    keyVault: keyVaultId
+    storageAccount: storageAccount.id
+    containerRegistry: containerRegistry.id
+    applicationInsights: applicationInsightsId
     primaryUserAssignedIdentity: platformIdentityId
     publicNetworkAccess: 'Disabled'
     managedNetwork: {

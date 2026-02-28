@@ -105,6 +105,10 @@ param enablePlane bool = false
 @description('Plane container image tag.')
 param planeImageTag string = 'latest'
 
+@description('Plane PostgreSQL admin password.')
+@secure()
+param planePostgresPassword string = ''
+
 // ============================================================================
 // Variables
 // ============================================================================
@@ -186,7 +190,6 @@ module keyvault 'modules/keyvault/main.bicep' = {
     adminObjectId: keyVaultAdminObjectId
     platformIdentityPrincipalId: identity.outputs.platformIdentityPrincipalId
     privateEndpointSubnetId: networking.outputs.privateEndpointSubnetId
-    vnetId: networking.outputs.spokeVnetId
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     enablePurgeProtection: isProd
   }
@@ -224,7 +227,6 @@ module aiFoundry 'modules/ai-foundry/main.bicep' = if (enableAIFoundry) {
     resourcePrefix: resourcePrefix
     tags: tags
     privateEndpointSubnetId: networking.outputs.privateEndpointSubnetId
-    vnetId: networking.outputs.spokeVnetId
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     keyVaultId: keyvault.outputs.keyVaultId
     applicationInsightsId: monitoring.outputs.applicationInsightsId
@@ -244,7 +246,6 @@ module appService 'modules/app-service/main.bicep' = {
     appServicePlanSku: appServicePlanSku
     appServiceSubnetId: networking.outputs.appServiceSubnetId
     privateEndpointSubnetId: networking.outputs.privateEndpointSubnetId
-    vnetId: networking.outputs.spokeVnetId
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     applicationInsightsConnectionString: monitoring.outputs.applicationInsightsConnectionString
     platformIdentityId: identity.outputs.platformIdentityId
@@ -277,7 +278,6 @@ module purview 'modules/purview/main.bicep' = if (enablePurview) {
     resourcePrefix: resourcePrefix
     tags: tags
     privateEndpointSubnetId: networking.outputs.privateEndpointSubnetId
-    vnetId: networking.outputs.spokeVnetId
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
     platformIdentityPrincipalId: identity.outputs.platformIdentityPrincipalId
   }
@@ -295,6 +295,7 @@ module plane 'modules/plane/main.bicep' = if (enablePlane) {
     imageTag: planeImageTag
     appSubnetId: networking.outputs.appServiceSubnetId
     logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
+    planePostgresPassword: planePostgresPassword
   }
 }
 

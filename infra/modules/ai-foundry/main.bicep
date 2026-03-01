@@ -32,6 +32,10 @@ param applicationInsightsId string
 @description('Platform managed identity resource ID.')
 param platformIdentityId string
 
+@description('Public network access setting. Use Enabled for initial dev setup.')
+@allowed(['Enabled', 'Disabled'])
+param publicNetworkAccess string = 'Disabled'
+
 // ============================================================================
 // Variables
 // ============================================================================
@@ -130,7 +134,7 @@ resource aiHub 'Microsoft.MachineLearningServices/workspaces@2024-10-01' = {
     containerRegistry: containerRegistry.id
     applicationInsights: applicationInsightsId
     primaryUserAssignedIdentity: platformIdentityId
-    publicNetworkAccess: 'Disabled'
+    publicNetworkAccess: publicNetworkAccess
     managedNetwork: {
       isolationMode: 'AllowInternetOutbound'
     }
@@ -161,7 +165,7 @@ resource aiProject 'Microsoft.MachineLearningServices/workspaces@2024-10-01' = {
     description: 'AI project for manufacturing and sales analytics use cases'
     hubResourceId: aiHub.id
     primaryUserAssignedIdentity: platformIdentityId
-    publicNetworkAccess: 'Disabled'
+    publicNetworkAccess: publicNetworkAccess
   }
 }
 

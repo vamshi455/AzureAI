@@ -1,0 +1,230 @@
+# =============================================================================
+# Azure AI Foundry Agent Configuration - Equipment Health Agent
+# Purpose: Predictive maintenance agent for manufacturing equipment monitoring.
+#          Analyzes IoT sensor telemetry, ML-based health scores, and
+#          maintenance history to predict failures and recommend actions.
+# Platform: Azure AI Foundry (formerly Azure AI Studio)
+# =============================================================================
+
+agent:
+  name: "equipment-health-agent"
+  display_name: "Equipment Health Agent"
+  description: >
+    AI-powered predictive maintenance agent for manufacturing equipment.
+    Monitors equipment health scores, analyzes sensor telemetry, identifies
+    failure risks, and recommends maintenance actions based on ML predictions
+    and historical maintenance patterns.
+  version: "1.0.0"
+  tags:
+    - "predictive-maintenance"
+    - "equipment-health"
+    - "manufacturing"
+    - "iot-analytics"
+
+# -- Model Configuration --
+model:
+  deployment_name: "gpt-4o-equipment-health"
+  model_name: "gpt-4o"
+  api_version: "2025-04-01-preview"
+  endpoint: "${AZURE_OPENAI_ENDPOINT}"
+  parameters:
+    temperature: 0.1              # Low for factual equipment data
+    max_tokens: 4096
+    top_p: 0.95
+    frequency_penalty: 0.0
+    presence_penalty: 0.0
+
+# -- System Instructions --
+instructions:
+  system_prompt_file: "ai/prompts/system/equipment_health.md"
+  additional_instructions: |
+    CRITICAL OPERATIONAL RULES:
+    1. Always query equipment data before answering health questions.
+    2. Never fabricate sensor readings or health scores.
+    3. Always include the equipment ID, plant code, and data freshness.
+    4. For critical risk equipment, emphasize urgency and recommended actions.
+    5. When discussing RUL (remaining useful life), state the confidence level.
+    6. Format sensor readings with proper units (°C, bar, mm/s, %RH, L/min, kW).
+
+# -- Knowledge Sources (Grounding) --
+knowledge_sources:
+  # PostgreSQL tables with equipment health scores and IoT telemetry
+  - type: "custom_api"
+    name: "equipment-health-db"
+    description: "PostgreSQL tables with equipment health scores, IoT telemetry, and lifecycle events"
+    connection:
+      endpoint: "${API_ENDPOINT}/api/v1/equipment"
+      authentication:
+        type: "managed_identity"
+    tables:
+      - "equipment_health"
+      - "iot_telemetry"
+      - "equipment_lifecycle_events"
+
+  # pgvector RAG for equipment health documents
+  - type: "custom_api"
+    name: "rag-equipment-docs"
+    description: "Equipment health reports with sensor details, anomalies, trends, and maintenance history"
+    connection:
+      endpoint: "${RAG_API_ENDPOINT}/query"
+      authentication:
+        type: "managed_identity"
+    document_type: "equipment_health"
+    search_mode: "hybrid"
+
+# -- Tools (Function Calling) --
+tools:
+  - type: "function"
+    name: "get_equipment_status"
+    description: >
+      Get current health status for a specific equipment including health score,
+      failure risk, estimated remaining useful life, and recommended actions.
+    parameters:
+      type: "object"
+      required:
+        - "equipment_id"
+      properties:
+        equipment_id:
+          type: "string"
+          description: "Equipment identifier (e.g., EQ-1100-A-001)"
+
+  - type: "function"
+    name: "list_equipment_by_risk"
+    description: >
+      List equipment filtered by failure risk level. Returns equipment IDs,
+      health scores, and recommended actions sorted by failure probability.
+    parameters:
+      type: "object"
+      required:
+        - "risk_level"
+      properties:
+        risk_level:
+          type: "string"
+          enum:
+            - "Low"
+            - "Medium"
+            - "High"
+            - "Critical"
+          description: "Failure risk level filter"
+        plant_code:
+          type: "string"
+          description: "Optional plant code filter (e.g., 1100, 1200, 2100)"
+        limit:
+          type: "integer"
+          default: 20
+          description: "Maximum number of results to return"
+
+  - type: "function"
+    name: "get_sensor_readings"
+    description: >
+      Get recent sensor readings for an equipment. Returns time-series data
+      for temperature, pressure, vibration, humidity, flow rate, or power.
+    parameters:
+      type: "object"
+      required:
+        - "equipment_id"
+      properties:
+        equipment_id:
+          type: "string"
+          description: "Equipment identifier (e.g., EQ-1100-A-001)"
+        sensor_type:
+          type: "string"
+          enum:
+            - "temperature"
+            - "pressure"
+            - "vibration"
+            - "humidity"
+            - "flow_rate"
+            - "power"
+          description: "Filter to a specific sensor type (omit for all sensors)"
+        hours_back:
+          type: "integer"
+          default: 24
+          description: "Number of hours of history to retrieve"
+
+  - type: "function"
+    name: "search_maintenance_docs"
+    description: >
+      Search equipment health documents using semantic and keyword search.
+      Returns relevant maintenance history, anomaly reports, and trend analysis.
+    parameters:
+      type: "object"
+      required:
+        - "query"
+      properties:
+        query:
+          type: "string"
+          description: "Natural language search query for equipment health documentation"
+        equipment_id:
+          type: "string"
+          description: "Optional equipment ID to narrow search results"
+        top_k:
+          type: "integer"
+          default: 5
+          description: "Number of document chunks to return"
+
+  - type: "function"
+    name: "get_equipment_anomalies"
+    description: >
+      Find anomalous sensor readings for an equipment. Returns readings with
+      BAD or UNCERTAIN quality flags that may indicate degradation.
+    parameters:
+      type: "object"
+      required:
+        - "equipment_id"
+      properties:
+        equipment_id:
+          type: "string"
+          description: "Equipment identifier (e.g., EQ-1100-A-001)"
+        days_back:
+          type: "integer"
+          default: 30
+          description: "Number of days to look back for anomalies"
+        sensor_type:
+          type: "string"
+          enum:
+            - "temperature"
+            - "pressure"
+            - "vibration"
+            - "humidity"
+            - "flow_rate"
+            - "power"
+          description: "Optional: filter to a specific sensor type"
+
+# -- Guardrails --
+guardrails:
+  content_safety:
+    enabled: true
+    categories:
+      hate: "medium"
+      violence: "medium"
+      self_harm: "medium"
+      sexual: "medium"
+  grounding:
+    enabled: true
+    max_hallucination_score: 0.2    # Strict for safety-critical equipment data
+  output_validation:
+    enforce_data_citation: true
+    require_equipment_id: true
+    max_forecast_horizon_days: 180  # Don't predict beyond 6 months
+
+# -- Evaluation --
+evaluation:
+  enabled: true
+  metrics:
+    - "groundedness"
+    - "relevance"
+    - "coherence"
+    - "data_accuracy"
+  test_dataset: "ai/evaluation/test_sets/equipment_health_eval.jsonl"
+  schedule: "weekly"
+
+# -- Deployment --
+deployment:
+  auto_scale: true
+  min_instances: 1
+  max_instances: 5
+  target_utilization: 0.7
+  rate_limits:
+    requests_per_minute: 60
+    tokens_per_minute: 80000

@@ -12,9 +12,12 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import asyncpg
+
 from routes.chat import router as chat_router
 from routes.analytics import router as analytics_router
 from routes.tickets import router as tickets_router
+from services.equipment_tools import EquipmentTools
 
 # --- Logging Configuration ---
 logging.basicConfig(
@@ -34,12 +37,32 @@ async def lifespan(app: FastAPI):
 
     # Startup: initialize connections, warm up caches
     app.state.startup_time = datetime.utcnow()
+
+    # Initialize PostgreSQL connection pool for equipment tools
+    pg_conn_str = os.getenv("PGVECTOR_CONNECTION_STRING", "")
+    pg_pool = None
+    if pg_conn_str:
+        try:
+            pg_pool = await asyncpg.create_pool(pg_conn_str, min_size=2, max_size=10)
+            app.state.pg_pool = pg_pool
+            app.state.equipment_tools = EquipmentTools(pg_pool)
+            logger.info("PostgreSQL pool initialized for equipment tools.")
+        except Exception as e:
+            logger.warning(f"Could not initialize PostgreSQL pool: {e}")
+            app.state.equipment_tools = None
+    else:
+        logger.info("PGVECTOR_CONNECTION_STRING not set; equipment tools disabled.")
+        app.state.equipment_tools = None
+
     logger.info("Application startup complete.")
 
     yield
 
     # Shutdown: close connections, flush buffers
     logger.info("Shutting down Azure Data Platform API...")
+    if pg_pool:
+        await pg_pool.close()
+        logger.info("PostgreSQL pool closed.")
     logger.info("Application shutdown complete.")
 
 

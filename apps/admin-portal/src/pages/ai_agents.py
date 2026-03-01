@@ -127,6 +127,35 @@ AGENT_REGISTRY: list[dict[str, Any]] = [
             "cost_24h_usd": 8.90,
         },
     },
+    {
+        "id": "equipment-health-agent",
+        "name": "Equipment Health Agent",
+        "model": "gpt-4o",
+        "deployment": "ai-foundry-eastus",
+        "version": "1.0.0",
+        "status": "active",
+        "endpoint": "https://ai-foundry-eastus.openai.azure.com/",
+        "system_prompt": "Loaded from ai/prompts/system/equipment_health.md",
+        "temperature": 0.1,
+        "max_tokens": 4096,
+        "tools": [
+            "get_equipment_status",
+            "list_equipment_by_risk",
+            "get_sensor_readings",
+            "search_maintenance_docs",
+            "get_equipment_anomalies",
+        ],
+        "knowledge_base": "equipment-health-pgvector",
+        "metrics": {
+            "avg_latency_ms": 0,
+            "p95_latency_ms": 0,
+            "success_rate": 0,
+            "requests_24h": 0,
+            "avg_tokens_per_request": 0,
+            "user_satisfaction": 0,
+            "cost_24h_usd": 0,
+        },
+    },
 ]
 
 

@@ -61,6 +61,7 @@ deployments:
       context_window: 128000
     use_cases:
       - "sales_insights_agent"
+      - "equipment_health_agent"
       - "interactive_dashboards"
       - "report_generation"
 
@@ -104,6 +105,7 @@ deployments:
       encoding_format: "float"
     use_cases:
       - "product_catalog_indexing"
+      - "equipment_health_indexing"
       - "document_embedding"
       - "semantic_search"
       - "rag_retrieval"

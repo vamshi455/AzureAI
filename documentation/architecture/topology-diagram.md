@@ -38,12 +38,12 @@
 │  │  │                                                                     │  │  │
 │  │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐              │  │  │
 │  │  │  │ STORAGE  │ │POSTGRESQL│ │  FABRIC  │ │APP SERVC │              │  │  │
-│  │  │  │ (ADLS v2)│ │ ⏸ Skip  │ │  ⏸ Skip │ │  ⏸ Skip │              │  │  │
+│  │  │  │ (ADLS v2)│ │  ✅ Live │ │  ⏸ Skip │ │  ⏸ Skip │              │  │  │
 │  │  │  │  ✅ Live │ └──────────┘ └──────────┘ └──────────┘              │  │  │
 │  │  │  └──────────┘                                                      │  │  │
 │  │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐                          │  │  │
 │  │  │  │AI FOUNDRY│ │ PURVIEW  │ │  PLANE   │                          │  │  │
-│  │  │  │  ⏸ Skip │ │  ✅ Live │ │  ⏸ Skip │                          │  │  │
+│  │  │  │  ✅ Live │ │  ✅ Live │ │  ⏸ Skip │                          │  │  │
 │  │  │  └──────────┘ └──────────┘ └──────────┘                          │  │  │
 │  │  └─────────────────────────────────────────────────────────────────────┘  │  │
 │  └───────────────────────────────────────────────────────────────────────────┘  │
@@ -210,8 +210,14 @@ dp-rg-dev (Resource Group)
 │   └── dp-pe-dfs-dev              Private Endpoint (DFS)
 │       └── DNS: privatelink.dfs.core.windows.net
 │
-├── POSTGRESQL (⏸ not deployed) ─────────────────────────────
-│   └── Enable with: enablePostgresql=true (~$50/mo)
+├── POSTGRESQL (✅ deployed) ────────────────────────────────
+│   ├── dp-psql-dev                 Flexible Server (B1ms)
+│   │   ├── Version: 16 + pgvector + uuid-ossp
+│   │   ├── Databases: manufacturing_db, sales_db, vector_db
+│   │   ├── VNet Integration: snet-data (10.1.3.0/24)
+│   │   ├── Private DNS: privatelink.postgres.database.azure.com
+│   │   └── Public Access: Disabled
+│   └── Tables: equipment_health, iot_telemetry, document_embeddings
 │
 ├── FABRIC (⏸ not deployed) ─────────────────────────────────
 │   └── Enable with: enableFabric=true (~$262/mo)
@@ -219,8 +225,15 @@ dp-rg-dev (Resource Group)
 ├── APP SERVICE (⏸ not deployed) ────────────────────────────
 │   └── Enable with: enableAppService=true (~$55/mo)
 │
-├── AI FOUNDRY (⏸ not deployed) ─────────────────────────────
-│   └── Enable with: enableAIFoundry=true (usage-based)
+├── AI FOUNDRY (✅ deployed) ────────────────────────────────
+│   ├── dp-aih-dev                  AI Hub
+│   ├── dp-aip-mfg-sales-dev       AI Project
+│   ├── dp-aoai-dev                 Azure OpenAI (S0)
+│   │   ├── gpt-4o-equipment-health    (30K TPM)
+│   │   └── text-embedding-3-large-rag (50K TPM)
+│   ├── dpstaidevdpykeu37cxj6q     AI Storage
+│   ├── dpcraidevdpykeu37cxj6q     Container Registry (Premium)
+│   └── 3 Private Endpoints (Hub, CR, Storage)
 │
 ├── PURVIEW (DATA GOVERNANCE) ──────────────────────────────
 │   ├── dp-pview-dev                 Purview Account

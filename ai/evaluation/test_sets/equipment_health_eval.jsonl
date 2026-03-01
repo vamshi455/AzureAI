@@ -1,0 +1,12 @@
+{"query": "What is the health status of equipment EQ-1100-A-006?", "expected_tools": ["get_equipment_status"], "expected_fields": ["health_score", "failure_risk", "estimated_rul_days"], "category": "status_query"}
+{"query": "Show me all critical risk equipment in plant 1100", "expected_tools": ["list_equipment_by_risk"], "expected_fields": ["equipment_id", "failure_probability"], "category": "fleet_overview"}
+{"query": "What are the recent vibration readings for EQ-1200-B-010?", "expected_tools": ["get_sensor_readings"], "expected_fields": ["reading_value", "reading_unit", "sensor_type"], "category": "sensor_analysis"}
+{"query": "Are there any anomalies for EQ-2100-C-015 in the last 30 days?", "expected_tools": ["get_equipment_anomalies"], "expected_fields": ["anomaly_count", "quality_flag"], "category": "anomaly_detection"}
+{"query": "What maintenance is recommended for equipment with high failure risk?", "expected_tools": ["list_equipment_by_risk"], "expected_fields": ["recommended_action"], "category": "maintenance_planning"}
+{"query": "Search maintenance documentation for temperature threshold guidelines", "expected_tools": ["search_maintenance_docs"], "expected_fields": ["content", "relevance_score"], "category": "doc_search"}
+{"query": "Compare health scores across all plants", "expected_tools": ["list_equipment_by_risk"], "expected_fields": ["plant_code", "health_score"], "category": "fleet_overview"}
+{"query": "What is the estimated remaining useful life for EQ-3100-D-020?", "expected_tools": ["get_equipment_status"], "expected_fields": ["estimated_rul_days", "failure_probability"], "category": "rul_prediction"}
+{"query": "Show me equipment on LINE-A in plant 1100 that needs maintenance soon", "expected_tools": ["list_equipment_by_risk"], "expected_fields": ["production_line", "next_recommended_date"], "category": "maintenance_planning"}
+{"query": "What are the top risk factors for EQ-1100-A-006?", "expected_tools": ["get_equipment_status"], "expected_fields": ["top_risk_factors"], "category": "risk_analysis"}
+{"query": "Get temperature and pressure readings for EQ-2200-B-005 over the last 48 hours", "expected_tools": ["get_sensor_readings"], "expected_fields": ["reading_value", "reading_timestamp"], "category": "sensor_analysis"}
+{"query": "Find any equipment health reports mentioning vibration anomalies", "expected_tools": ["search_maintenance_docs"], "expected_fields": ["content", "document_id"], "category": "doc_search"}

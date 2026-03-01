@@ -5,13 +5,15 @@ Supports both standard request/response and streaming via SSE.
 
 import logging
 import json
+from pathlib import Path
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from models.schemas import ChatRequest, ChatResponse, ChatStreamEvent
 from services.ai_service import AIFoundryService
+from services.agent_executor import AgentExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,97 @@ AGENT_DEPLOYMENTS = {
         "temperature": 0.3,
         "max_tokens": 2048,
     },
+    "equipment-health-agent": {
+        "deployment_name": "gpt-4o",
+        "system_prompt_file": "ai/prompts/system/equipment_health.md",
+        "temperature": 0.1,
+        "max_tokens": 4096,
+        "tools": True,  # Uses function-calling tools via AgentExecutor
+    },
 }
+
+
+# Tool definitions for equipment-health-agent
+EQUIPMENT_HEALTH_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_equipment_status",
+            "description": "Get current health status for a specific equipment including health score, failure risk, estimated remaining useful life, and recommended actions.",
+            "parameters": {
+                "type": "object",
+                "required": ["equipment_id"],
+                "properties": {
+                    "equipment_id": {"type": "string", "description": "Equipment identifier (e.g., EQ-1100-A-001)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_equipment_by_risk",
+            "description": "List equipment filtered by failure risk level, sorted by failure probability.",
+            "parameters": {
+                "type": "object",
+                "required": ["risk_level"],
+                "properties": {
+                    "risk_level": {"type": "string", "enum": ["Low", "Medium", "High", "Critical"]},
+                    "plant_code": {"type": "string", "description": "Optional plant code filter"},
+                    "limit": {"type": "integer", "default": 20},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_sensor_readings",
+            "description": "Get recent sensor readings for an equipment (temperature, pressure, vibration, etc.).",
+            "parameters": {
+                "type": "object",
+                "required": ["equipment_id"],
+                "properties": {
+                    "equipment_id": {"type": "string"},
+                    "sensor_type": {"type": "string", "enum": ["temperature", "pressure", "vibration", "humidity", "flow_rate", "power"]},
+                    "hours_back": {"type": "integer", "default": 24},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_maintenance_docs",
+            "description": "Search equipment health documents using semantic and keyword search.",
+            "parameters": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {"type": "string", "description": "Natural language search query"},
+                    "equipment_id": {"type": "string"},
+                    "top_k": {"type": "integer", "default": 5},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_equipment_anomalies",
+            "description": "Find anomalous sensor readings for an equipment (BAD or UNCERTAIN quality flags).",
+            "parameters": {
+                "type": "object",
+                "required": ["equipment_id"],
+                "properties": {
+                    "equipment_id": {"type": "string"},
+                    "days_back": {"type": "integer", "default": 30},
+                    "sensor_type": {"type": "string", "enum": ["temperature", "pressure", "vibration", "humidity", "flow_rate", "power"]},
+                },
+            },
+        },
+    },
+]
 
 
 def _get_agent_config(agent_id: str) -> dict:
@@ -80,10 +172,21 @@ def _get_agent_config(agent_id: str) -> dict:
     return config
 
 
+def _load_system_prompt(agent_config: dict) -> str:
+    """Load the system prompt, either inline or from a file."""
+    if "system_prompt_file" in agent_config:
+        prompt_path = Path(__file__).resolve().parent.parent.parent.parent.parent / agent_config["system_prompt_file"]
+        if prompt_path.exists():
+            return prompt_path.read_text(encoding="utf-8")
+        logger.warning(f"System prompt file not found: {prompt_path}, using fallback")
+    return agent_config.get("system_prompt", "You are a helpful assistant.")
+
+
 def _build_messages(agent_config: dict, user_messages: list[dict]) -> list[dict]:
     """Build the full message list including system prompt."""
+    system_prompt = _load_system_prompt(agent_config)
     messages = [
-        {"role": "system", "content": agent_config["system_prompt"]},
+        {"role": "system", "content": system_prompt},
     ]
     for msg in user_messages:
         messages.append({"role": msg["role"], "content": msg["content"]})
@@ -91,15 +194,20 @@ def _build_messages(agent_config: dict, user_messages: list[dict]) -> list[dict]
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, raw_request: Request):
     """
     Send a chat message to an AI agent and get a response.
 
     If `stream` is True, returns a Server-Sent Events stream.
     Otherwise, returns a complete JSON response.
+    Tool-calling agents (like equipment-health-agent) use the AgentExecutor loop.
     """
     agent_config = _get_agent_config(request.agent_id)
     messages = _build_messages(agent_config, [m.model_dump() for m in request.messages])
+
+    # Tool-calling agent path (equipment-health-agent)
+    if agent_config.get("tools"):
+        return await _handle_tool_agent(raw_request, agent_config, messages, request.agent_id)
 
     if request.stream:
         return StreamingResponse(
@@ -143,6 +251,58 @@ async def chat(request: ChatRequest):
         )
     except Exception as e:
         logger.error(f"Chat completion failed for agent '{request.agent_id}': {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"AI agent communication failed: {str(e)}")
+
+
+async def _handle_tool_agent(
+    raw_request: Request, agent_config: dict, messages: list[dict], agent_id: str
+) -> ChatResponse:
+    """Handle agents that use function-calling tools via AgentExecutor."""
+    from services.equipment_tools import EquipmentTools
+
+    # Get the equipment tools from app state (initialized in lifespan)
+    equipment_tools: EquipmentTools | None = getattr(
+        raw_request.app.state, "equipment_tools", None
+    )
+
+    if equipment_tools is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Equipment tools not initialized. Database connection may be unavailable.",
+        )
+
+    tool_handlers = {
+        "get_equipment_status": equipment_tools.get_equipment_status,
+        "list_equipment_by_risk": equipment_tools.list_equipment_by_risk,
+        "get_sensor_readings": equipment_tools.get_sensor_readings,
+        "search_maintenance_docs": equipment_tools.search_maintenance_docs,
+        "get_equipment_anomalies": equipment_tools.get_equipment_anomalies,
+    }
+
+    executor = AgentExecutor(ai_service=ai_service, tool_handlers=tool_handlers)
+
+    try:
+        result = await executor.run(
+            deployment_name=agent_config["deployment_name"],
+            messages=messages,
+            tools=EQUIPMENT_HEALTH_TOOLS,
+            temperature=agent_config["temperature"],
+            max_tokens=agent_config["max_tokens"],
+        )
+
+        citations = _extract_citations(result["content"])
+
+        return ChatResponse(
+            id="",
+            content=result["content"],
+            agent_id=agent_id,
+            model=agent_config["deployment_name"],
+            citations=citations,
+            usage=result["usage"],
+            finish_reason="stop",
+        )
+    except Exception as e:
+        logger.error(f"Tool agent failed for '{agent_id}': {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=f"AI agent communication failed: {str(e)}")
 
 

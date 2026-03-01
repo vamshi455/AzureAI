@@ -19,6 +19,7 @@ from config import (
     SAP_PLANTS,
     IOT_DEVICE_TYPES,
     IOT_PRODUCTION_LINES,
+    IOT_DEVICE_COUNT,
     DATE_RANGE_START,
     DATE_RANGE_END,
 )
@@ -71,7 +72,7 @@ MEASUREMENT_PROFILES: dict[str, dict] = {
 class IoTTelemetryGenerator:
     """Generate IoT telemetry data from manufacturing equipment sensors.
 
-    The generator first registers a fleet of ~100 devices distributed evenly
+    The generator first registers a fleet of ~200 devices distributed evenly
     across the configured SAP plants and production lines, then produces
     ``VOLUMES["iot_telemetry"]`` telemetry rows referencing those devices.
     """
@@ -90,7 +91,7 @@ class IoTTelemetryGenerator:
     def _register_devices(self) -> None:
         """Register ~100 devices spread across plants, lines, and types."""
         device_seq = 1
-        target_count = 100
+        target_count = IOT_DEVICE_COUNT
 
         # Distribute devices as evenly as possible across plants
         devices_per_plant = max(1, target_count // len(SAP_PLANTS))
@@ -173,70 +174,69 @@ class IoTTelemetryGenerator:
         return value, profile["unit"]
 
     def generate_telemetry(self) -> pd.DataFrame:
-        """Generate a DataFrame of IoT telemetry readings.
+        """Generate IoT telemetry readings in batches for memory efficiency."""
+        from tqdm import tqdm
 
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame with ``VOLUMES["iot_telemetry"]`` rows containing
-            device metadata, measurement data, quality flags, raw JSON
-            payload, bronze metadata columns, and ``_bronze_row_hash``.
-        """
         num_rows = VOLUMES["iot_telemetry"]
-        rows: list[dict] = []
+        batch_size = 100_000
+        all_dfs: list[pd.DataFrame] = []
 
-        for _ in range(num_rows):
-            device = fake.random_element(self.devices)
-            device_type = device["device_type"]
-            measurement_value, measurement_unit = self._generate_reading(device_type)
+        for batch_start in tqdm(range(0, num_rows, batch_size), desc="IoT Telemetry (batches)"):
+            batch_end = min(batch_start + batch_size, num_rows)
+            rows: list[dict] = []
 
-            event_ts = self._random_timestamp()
-            # Enqueued timestamp is typically a few ms to seconds after event
-            enqueue_delay = timedelta(
-                milliseconds=random.randint(50, 5000)
-            )
-            enqueued_ts = event_ts + enqueue_delay
+            for _ in range(batch_end - batch_start):
+                device = fake.random_element(self.devices)
+                device_type = device["device_type"]
+                measurement_value, measurement_unit = self._generate_reading(device_type)
 
-            quality_flag = random.choice(self._QUALITY_FLAGS)
+                event_ts = self._random_timestamp()
+                enqueue_delay = timedelta(
+                    milliseconds=random.randint(50, 5000)
+                )
+                enqueued_ts = event_ts + enqueue_delay
 
-            # Build the raw JSON payload as it would arrive from the device
-            raw_payload = json.dumps(
-                {
-                    "deviceId": device["device_id"],
-                    "type": device_type,
-                    "value": measurement_value,
-                    "unit": measurement_unit,
-                    "quality": quality_flag,
-                    "ts": event_ts.isoformat(),
-                },
-                separators=(",", ":"),
-            )
+                quality_flag = random.choice(self._QUALITY_FLAGS)
 
-            meta = bronze_metadata(
-                source_system="iot",
-                source_table="iot_telemetry",
-                load_type="incremental",
-            )
+                raw_payload = json.dumps(
+                    {
+                        "deviceId": device["device_id"],
+                        "type": device_type,
+                        "value": measurement_value,
+                        "unit": measurement_unit,
+                        "quality": quality_flag,
+                        "ts": event_ts.isoformat(),
+                    },
+                    separators=(",", ":"),
+                )
 
-            row = {
-                "device_id": device["device_id"],
-                "device_type": device_type,
-                "plant_code": device["plant_code"],
-                "production_line": device["production_line"],
-                "equipment_id": device["equipment_id"],
-                "measurement_type": device_type,
-                "measurement_value": measurement_value,
-                "measurement_unit": measurement_unit,
-                "event_timestamp": event_ts.isoformat(),
-                "event_enqueued_timestamp": enqueued_ts.isoformat(),
-                "quality_flag": quality_flag,
-                "raw_payload": raw_payload,
-                **meta,
-            }
-            row["_bronze_row_hash"] = row_hash(row)
-            rows.append(row)
+                meta = bronze_metadata(
+                    source_system="iot",
+                    source_table="iot_telemetry",
+                    load_type="incremental",
+                )
 
-        return pd.DataFrame(rows)
+                row = {
+                    "device_id": device["device_id"],
+                    "device_type": device_type,
+                    "plant_code": device["plant_code"],
+                    "production_line": device["production_line"],
+                    "equipment_id": device["equipment_id"],
+                    "measurement_type": device_type,
+                    "measurement_value": measurement_value,
+                    "measurement_unit": measurement_unit,
+                    "event_timestamp": event_ts.isoformat(),
+                    "event_enqueued_timestamp": enqueued_ts.isoformat(),
+                    "quality_flag": quality_flag,
+                    "raw_payload": raw_payload,
+                    **meta,
+                }
+                row["_bronze_row_hash"] = row_hash(row)
+                rows.append(row)
+
+            all_dfs.append(pd.DataFrame(rows))
+
+        return pd.concat(all_dfs, ignore_index=True)
 
     # ------------------------------------------------------------------
     # Public API

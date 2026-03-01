@@ -345,11 +345,11 @@ class SAPSDGenerator:
         self, vbrk_df: pd.DataFrame, vbap_df: pd.DataFrame
     ) -> pd.DataFrame:
         """Billing items -- copies line items from referenced sales orders."""
-        # Build a lookup: sales order VBELN -> list of item rows
-        order_items: dict[str, list[dict]] = {}
-        for _, item in vbap_df.iterrows():
-            vbeln_order = str(item["VBELN"])
-            order_items.setdefault(vbeln_order, []).append(item)
+        # Build lookup using groupby (O(1) per order vs O(n) iterrows at 300K rows)
+        vbap_grouped = {
+            str(vbeln): group.to_dict("records")
+            for vbeln, group in vbap_df.groupby("VBELN")
+        }
 
         rows: list[dict] = []
         for _, bill in tqdm(
@@ -357,7 +357,7 @@ class SAPSDGenerator:
         ):
             vbeln_bill = str(bill["VBELN"])
             vbeln_order = str(bill["VBELN_VBA"])
-            items = order_items.get(vbeln_order, [])
+            items = vbap_grouped.get(vbeln_order, [])
 
             for seq, item in enumerate(items, start=1):
                 row = {
@@ -433,11 +433,11 @@ class SAPSDGenerator:
         self, likp_df: pd.DataFrame, vbap_df: pd.DataFrame
     ) -> pd.DataFrame:
         """Delivery items -- copies line items from referenced sales orders."""
-        # Build a lookup: sales order VBELN -> list of item rows
-        order_items: dict[str, list[dict]] = {}
-        for _, item in vbap_df.iterrows():
-            vbeln_order = str(item["VBELN"])
-            order_items.setdefault(vbeln_order, []).append(item)
+        # Build lookup using groupby (O(1) per order vs O(n) iterrows at 300K rows)
+        vbap_grouped = {
+            str(vbeln): group.to_dict("records")
+            for vbeln, group in vbap_df.groupby("VBELN")
+        }
 
         rows: list[dict] = []
         for _, delivery in tqdm(
@@ -445,7 +445,7 @@ class SAPSDGenerator:
         ):
             vbeln_del = str(delivery["VBELN"])
             vbeln_order = str(delivery["VBELN_VBA"])
-            items = order_items.get(vbeln_order, [])
+            items = vbap_grouped.get(vbeln_order, [])
 
             for seq, item in enumerate(items, start=1):
                 row = {

@@ -45,7 +45,8 @@ def ensure_output_dirs():
         OUTPUT_BRONZE / "crm_salesforce" / "pricebook_entries",
         OUTPUT_BRONZE / "iot" / "telemetry",
         OUTPUT_RAG / "product-catalog",
-        OUTPUT_RAG / "customer-profiles",
+        OUTPUT_RAG / "customer-360",
+        OUTPUT_RAG / "transactions",
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)

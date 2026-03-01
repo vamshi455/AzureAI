@@ -22,26 +22,26 @@ OUTPUT_RAG = OUTPUT_DIR / "rag-documents"
 # Data Volume Configuration
 # ============================================================================
 VOLUMES = {
-    # ERP - SAP SD
-    "kna1": 5_000,           # Customer Master
-    "mara": 1_000,           # Material Master
-    "mard": 3_000,           # Plant Stock
-    "vbak": 10_000,          # Sales Order Header
-    "vbap": 35_000,          # Sales Order Item
-    "vbrk": 8_000,           # Billing Header
-    "vbrp": 25_000,          # Billing Item
-    "likp": 9_000,           # Delivery Header
-    "lips": 30_000,          # Delivery Item
-    # CRM - Salesforce
-    "accounts": 5_000,
-    "contacts": 15_000,
-    "opportunities": 8_000,
-    "leads": 12_000,
-    "cases": 6_000,
-    "products": 500,
-    "pricebook_entries": 1_500,
-    # IoT
-    "iot_telemetry": 20_000,
+    # ERP - SAP SD (~1.08M rows)
+    "kna1": 10_000,          # Customer Master
+    "mara": 2_000,           # Material Master
+    "mard": 6_000,           # Plant Stock (1-3 per material across plants)
+    "vbak": 100_000,         # Sales Order Header (~4,167/month over 24 months)
+    "vbap": 300_000,         # Sales Order Item (avg 3 items/order)
+    "vbrk": 80_000,          # Billing Header (80% of orders billed)
+    "vbrp": 240_000,         # Billing Item
+    "likp": 85_000,          # Delivery Header (85% of orders delivered)
+    "lips": 255_000,         # Delivery Item
+    # CRM - Salesforce (~163K rows)
+    "accounts": 10_000,
+    "contacts": 30_000,
+    "opportunities": 50_000,
+    "leads": 40_000,
+    "cases": 25_000,
+    "products": 2_000,
+    "pricebook_entries": 6_000,
+    # IoT (~500K rows)
+    "iot_telemetry": 500_000,
 }
 
 # ============================================================================
@@ -98,5 +98,13 @@ SF_CASE_TYPES = [
 ]
 
 # IoT configuration
+IOT_DEVICE_COUNT = 200
 IOT_DEVICE_TYPES = ["temperature", "pressure", "vibration", "humidity", "flow_rate", "power"]
 IOT_PRODUCTION_LINES = ["LINE-A", "LINE-B", "LINE-C", "LINE-D"]
+
+# ============================================================================
+# RAG Chunking Configuration (used by chunk_for_rag.py)
+# ============================================================================
+RAG_LARGE_ORDER_THRESHOLD = 50_000   # Orders > $50K get individual RAG docs
+RAG_RECENT_MONTHS = 6                # Orders in last N months get individual docs
+RAG_CUSTOMER_PROFILES = "all"        # "all" or integer for top-N by revenue

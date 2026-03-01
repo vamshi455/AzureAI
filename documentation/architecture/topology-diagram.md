@@ -191,7 +191,8 @@ dp-rg-dev (Resource Group)
 │   │   ├── Container: gold        Star schema, KPIs (future)
 │   │   ├── Container: rag-documents
 │   │   │   ├── product-catalog/   JSON + CSV for RAG indexing
-│   │   │   └── customer-profiles/ Markdown for RAG indexing
+│   │   │   ├── customer-360/     Customer 360 Markdown (all 10K)
+│   │   │   └── transactions/     Order lifecycle JSON (~20K)
 │   │   ├── Public Access: Enabled (dev), Disabled (prod)
 │   │   └── Diagnostic Settings → dp-log-dev
 │   ├── dp-pe-blob-dev             Private Endpoint (blob)

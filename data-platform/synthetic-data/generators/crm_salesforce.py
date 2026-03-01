@@ -10,6 +10,7 @@ import uuid
 from datetime import date, datetime, timedelta
 
 import pandas as pd
+from tqdm import tqdm
 
 from generators.base import SharedMasterData, bronze_metadata, row_hash, fake
 from config import (
@@ -252,7 +253,7 @@ class SalesforceGenerator:
         rows: list[dict] = []
         meta = bronze_metadata(_SOURCE_SYSTEM, "Contact")
 
-        for _ in range(num):
+        for _ in tqdm(range(num), desc="Contacts"):
             acct_id = fake.random_element(account_ids)
             created = _random_iso_datetime()
             first = fake.first_name()
@@ -294,7 +295,7 @@ class SalesforceGenerator:
         rows: list[dict] = []
         meta = bronze_metadata(_SOURCE_SYSTEM, "Opportunity")
 
-        for _ in range(num):
+        for _ in tqdm(range(num), desc="Opportunities"):
             stage = fake.random_element(SF_OPPORTUNITY_STAGES)
             is_closed = stage in ("Closed Won", "Closed Lost")
             is_won = stage == "Closed Won"
@@ -352,7 +353,7 @@ class SalesforceGenerator:
         statuses = ["New"] * 4 + ["Working"] * 3 + ["Qualified"] * 2 + ["Unqualified"]
         ratings = ["Hot"] * 2 + ["Warm"] * 5 + ["Cold"] * 3
 
-        for _ in range(num):
+        for _ in tqdm(range(num), desc="Leads"):
             created = _random_iso_datetime()
             is_converted = fake.boolean(chance_of_getting_true=20)
 
@@ -408,7 +409,7 @@ class SalesforceGenerator:
         rows: list[dict] = []
         meta = bronze_metadata(_SOURCE_SYSTEM, "Case")
 
-        for _ in range(num):
+        for _ in tqdm(range(num), desc="Cases"):
             created = _random_iso_datetime()
             status = fake.random_element(
                 elements=["New"] * 3 + ["In Progress"] * 4 + ["Escalated"] * 1 + ["Closed"] * 4

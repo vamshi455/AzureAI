@@ -32,15 +32,15 @@ during the Silver layer transformation.
 
 | SAP Table | Entity Name | Description | Estimated Volume | Load Pattern |
 |-----------|-------------|-------------|-----------------|--------------|
-| `KNA1` | Customer Master | General customer master data | 5,000 rows | Full load (daily) |
-| `MARA` | Material Master | General material data | 1,000 rows | Full load (daily) |
-| `MARD` | Plant Stock | Material stock at plant/storage location level | 3,000 rows | Full load (daily) |
-| `VBAK` | Sales Order Header | Sales document header data | 10,000 rows | Incremental (hourly) |
-| `VBAP` | Sales Order Item | Sales document item data | 35,000 rows | Incremental (hourly) |
-| `VBRK` | Billing Header | Billing document header data | 8,000 rows | Incremental (hourly) |
-| `VBRP` | Billing Item | Billing document item data | 25,000 rows | Incremental (hourly) |
-| `LIKP` | Delivery Header | Delivery document header data | 9,000 rows | Incremental (hourly) |
-| `LIPS` | Delivery Item | Delivery document item data | 30,000 rows | Incremental (hourly) |
+| `KNA1` | Customer Master | General customer master data | 10,000 rows | Full load (daily) |
+| `MARA` | Material Master | General material data | 2,000 rows | Full load (daily) |
+| `MARD` | Plant Stock | Material stock at plant/storage location level | 6,000 rows | Full load (daily) |
+| `VBAK` | Sales Order Header | Sales document header data | 100,000 rows | Incremental (hourly) |
+| `VBAP` | Sales Order Item | Sales document item data | 300,000 rows | Incremental (hourly) |
+| `VBRK` | Billing Header | Billing document header data | 80,000 rows | Incremental (hourly) |
+| `VBRP` | Billing Item | Billing document item data | 240,000 rows | Incremental (hourly) |
+| `LIKP` | Delivery Header | Delivery document header data | 85,000 rows | Incremental (hourly) |
+| `LIPS` | Delivery Item | Delivery document item data | 255,000 rows | Incremental (hourly) |
 
 ### KNA1 -- Customer Master
 
@@ -283,13 +283,13 @@ Line-item detail for delivery documents.
 
 | API Object Name | Entity Name | Description | Estimated Volume | Load Pattern |
 |-----------------|-------------|-------------|-----------------|--------------|
-| `Account` | Accounts | Company/customer records | 5,000 rows | Incremental (`SystemModstamp`) |
-| `Contact` | Contacts | Individual contacts at accounts | 15,000 rows | Incremental (`SystemModstamp`) |
-| `Opportunity` | Opportunities | Sales deals and pipeline | 8,000 rows | Incremental (`SystemModstamp`) |
-| `Lead` | Leads | Prospective customers | 12,000 rows | Incremental (`SystemModstamp`) |
-| `Case` | Cases | Support cases and issues | 6,000 rows | Incremental (`SystemModstamp`) |
-| `Product2` | Products | Product catalog entries | 500 rows | Full load (daily) |
-| `PricebookEntry` | Pricebook Entries | Product pricing records | 1,500 rows | Full load (daily) |
+| `Account` | Accounts | Company/customer records | 10,000 rows | Incremental (`SystemModstamp`) |
+| `Contact` | Contacts | Individual contacts at accounts | 30,000 rows | Incremental (`SystemModstamp`) |
+| `Opportunity` | Opportunities | Sales deals and pipeline | 50,000 rows | Incremental (`SystemModstamp`) |
+| `Lead` | Leads | Prospective customers | 40,000 rows | Incremental (`SystemModstamp`) |
+| `Case` | Cases | Support cases and issues | 25,000 rows | Incremental (`SystemModstamp`) |
+| `Product2` | Products | Product catalog entries | 2,000 rows | Full load (daily) |
+| `PricebookEntry` | Pricebook Entries | Product pricing records | 6,000 rows | Full load (daily) |
 
 ### Account
 
@@ -620,10 +620,16 @@ Every Bronze table includes the following system-generated metadata columns:
 
 ## RAG Document Structure
 
-The RAG (Retrieval-Augmented Generation) pipeline consumes structured and
-unstructured documents from the following directories. These documents are
-indexed into PostgreSQL + pgvector by the
-`ai/rag/indexing/index_product_catalog.py` pipeline.
+The RAG (Retrieval-Augmented Generation) pipeline produces three types of documents
+stored in the `rag-documents` ADLS container. These documents are indexed into
+PostgreSQL + pgvector by the `ai/rag/indexing/index_product_catalog.py` pipeline.
+
+| Document Type | Count | Format | Generator |
+|--------------|-------|--------|-----------|
+| Product Catalogs | ~2,000 | JSON + CSV | `rag_document_generator.py` |
+| Customer 360 Profiles | ~10,000 | Markdown | `chunk_for_rag.py` |
+| Transaction Lifecycle | ~15K-25K | JSON | `chunk_for_rag.py` |
+| **Total** | **~27K-37K** | | |
 
 ```
 rag-documents/
@@ -633,16 +639,23 @@ rag-documents/
 |   +-- material_0000000001.json     # Per-material JSON files
 |   +-- material_0000000002.json     #   (material_number, product_name,
 |   +-- ...                          #    category, description,
-|   +-- material_0000001000.json     #    specifications, applications,
+|   +-- material_0000002000.json     #    specifications, applications,
 |   |                                #    compliance)
 |   +-- catalog_master.csv           # Bulk CSV with all materials
 |
-+-- customer-profiles/
++-- customer-360/
+|   |
+|   +-- customer_0000000001.md       # Per-customer Markdown (all 10K)
+|   +-- customer_0000000002.md       #   Aggregates SAP + Salesforce data:
+|   +-- ...                          #   orders, pipeline, cases, contacts
+|   +-- customer_0000010000.md
+|
++-- transactions/
     |
-    +-- customer_0000000001.md       # Per-customer Markdown files
-    +-- customer_0000000002.md       #   (company overview, industry,
-    +-- ...                          #    location, key stats, order
-    +-- customer_0000000200.md       #    history, preferred products)
+    +-- order_0000000001.json        # Per-order lifecycle JSON
+    +-- order_0000000002.json        #   Significant orders only:
+    +-- ...                          #   > $50K OR last 6 months
+    +-- order_XXXXXXXXXX.json        #   header, items, billing, delivery
 ```
 
 ### Product Catalog JSON Schema
@@ -677,12 +690,70 @@ Each product catalog JSON file follows this structure, compatible with the
 }
 ```
 
-### Customer Profile Markdown Structure
+### Customer 360 Markdown Structure
 
-Each customer profile Markdown file includes:
+Each Customer 360 profile is a rich Markdown document aggregating data from both
+SAP ERP and Salesforce CRM. Generated by `chunk_for_rag.py` for all 10,000
+customers. Includes:
 
-- `# Company Name` heading
-- **Company Overview** section with industry, location, and size
-- **Key Information** table with SAP KUNNR, Salesforce Account ID, and demographics
-- **Order History Summary** with estimated orders and revenue
-- **Preferred Products** list
+- `# Customer 360: {Company Name}` heading
+- **Overview** table with SAP KUNNR, Salesforce Account ID, industry, location, revenue
+- **Order Summary** with total orders, revenue, average order value, top products, YoY trend
+- **Recent Orders** table (last 6 months) with order number, date, items, value, status
+- **Salesforce Pipeline** with open/won/lost opportunities and win rate
+- **Support History** with case counts, open issues, avg resolution time, top issue types
+- **Key Contacts** table with name, title, email
+
+### Transaction Lifecycle JSON Schema
+
+Each transaction document captures the full lifecycle of a significant sales order
+(orders > $50,000 OR created in the last 6 months). Generated by `chunk_for_rag.py`.
+
+```json
+{
+  "document_type": "sales_order_lifecycle",
+  "order_number": "0000145023",
+  "customer": {
+    "kunnr": "0000005432",
+    "name": "Acme Manufacturing Corp",
+    "city": "Detroit",
+    "country": "US"
+  },
+  "order_header": {
+    "created_date": "2025-09-15",
+    "order_type": "ZOR",
+    "sales_org": "1000",
+    "net_value": 78500.00,
+    "currency": "USD",
+    "customer_po": "PO-AC-2025-0892"
+  },
+  "line_items": [
+    {
+      "item": "000010",
+      "material": "0000000001",
+      "material_name": "Carbon Steel Coil HR 2.0mm",
+      "quantity": 500,
+      "unit": "KG",
+      "net_value": 42500.00,
+      "plant": "1100"
+    }
+  ],
+  "billing": {
+    "billing_doc": "0090123456",
+    "billing_date": "2025-09-20",
+    "net_value": 78500.00
+  },
+  "delivery": {
+    "delivery_doc": "0080198765",
+    "planned_gi_date": "2025-09-18",
+    "actual_gi_date": "2025-09-18",
+    "shipping_point": "SH01"
+  },
+  "status": "Delivered and Billed",
+  "salesforce_opportunity": {
+    "id": "006Dn00000X1y2zABC",
+    "stage": "Closed Won",
+    "amount": 78500.00
+  }
+}
+```

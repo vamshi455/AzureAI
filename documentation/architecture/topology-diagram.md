@@ -1,6 +1,6 @@
 # Azure Data Platform - Infrastructure Topology
 
-> **Last updated:** 2026-02-28 | **Environment:** Dev deployed | QA/Prod planned
+> **Last updated:** 2026-03-01 | **Environment:** Dev deployed | QA/Prod planned
 
 ---
 
@@ -188,11 +188,13 @@ dp-rg-dev (Resource Group)
 │   │   │   ├── crm_salesforce/    Salesforce: accounts, contacts, opps...
 │   │   │   └── iot/telemetry/     IoT sensor readings
 │   │   ├── Container: silver      Cleaned, deduped (future)
-│   │   ├── Container: gold        Star schema, KPIs (future)
+│   │   ├── Container: gold         Aggregated KPIs, ML predictions
+│   │   │   └── equipment_health_scores.parquet
 │   │   ├── Container: rag-documents
 │   │   │   ├── product-catalog/   JSON + CSV for RAG indexing
 │   │   │   ├── customer-360/     Customer 360 Markdown (all 10K)
-│   │   │   └── transactions/     Order lifecycle JSON (~20K)
+│   │   │   ├── transactions/     Order lifecycle JSON (~70K)
+│   │   │   └── equipment-health/ Equipment health reports (~200)
 │   │   ├── Public Access: Enabled (dev), Disabled (prod)
 │   │   └── Diagnostic Settings → dp-log-dev
 │   ├── dp-pe-blob-dev             Private Endpoint (blob)
@@ -249,8 +251,16 @@ dp-rg-dev (Resource Group)
  ┌───────────┐     │  ┌──────────────────────────┐    │       │
  │  IoT      │────►│  │ RAG-DOCUMENTS container  │    │       │
  │  Sensors  │     │  │ product-catalog/ (JSON)   │    │       │
- └───────────┘     │  │ customer-profiles/ (MD)   │    │       │
-                   │  │ catalog_master.csv        │    │       │
+ │ (200 equip│     │  │ customer-360/ (Markdown)  │    │       │
+ │  6 types) │     │  │ transactions/ (JSON)      │    │       │
+ └───────────┘     │  │ equipment-health/ (MD)    │◄───┘       │
+                   │  └──────────────────────────┘    │       │
+                   │                                   │       │
+                   │  ┌──────────────────────────┐    │       │
+                   │  │ ML PIPELINE (local)       │    │       │
+                   │  │ IoT → Features → RF Model │    │       │
+                   │  │ → Health Scores (gold/)   │    │       │
+                   │  │ → Equipment RAG docs      │    │       │
                    │  └──────────────────────────┘    │       │
                    └──────────────────────────────────┘       │
                                                               │
@@ -266,9 +276,11 @@ dp-rg-dev (Resource Group)
  │  │             │    │              │    │               │  │
  │  │ Gold layer  │    │ GPT-4.1      │    │ RAG vectors   │  │
  │  │ tables via  │    │ GPT-4o       │    │ Product docs  │  │
- │  │ identity    │    │              │    │ Hybrid search │  │
- │  │ passthrough │    │ Demand Agent │    │ HNSW indexes  │  │
- │  └─────────────┘    │ Sales Agent  │    └───────────────┘  │
+ │  │ identity    │    │              │    │ Customer 360  │  │
+ │  │ passthrough │    │ Demand Agent │    │ Equip Health  │  │
+ │  └─────────────┘    │ Sales Agent  │    │ Hybrid search │  │
+ │                     │ Maint. Agent │    │ HNSW indexes  │  │
+ │                     └──────────────┘    └───────────────┘  │
  │                     └──────────────┘                        │
  └─────────────────────────────────────────────────────────────┘
 ```

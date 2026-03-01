@@ -25,9 +25,11 @@ from tqdm import tqdm
 from config import (
     OUTPUT_BRONZE,
     OUTPUT_RAG,
+    OUTPUT_GOLD,
     DATE_RANGE_END,
     RAG_LARGE_ORDER_THRESHOLD,
     RAG_RECENT_MONTHS,
+    HEALTH_SCORE_THRESHOLDS,
 )
 
 
@@ -404,6 +406,242 @@ class TransactionDocGenerator:
         return count
 
 
+class EquipmentHealthGenerator:
+    """Generate Equipment Health Report Markdown documents for RAG indexing.
+
+    Reads ML predictions from gold/equipment_health_scores.parquet and IoT
+    telemetry from bronze to produce one Markdown file per equipment.
+    """
+
+    # Normal operating ranges for status labels
+    NORMAL_RANGES = {
+        "temperature": (20.0, 60.0),
+        "pressure": (2.0, 10.0),
+        "vibration": (0.5, 8.0),
+        "humidity": (30.0, 70.0),
+        "flow_rate": (5.0, 40.0),
+        "power": (50.0, 300.0),
+    }
+
+    SENSOR_UNITS = {
+        "temperature": "C", "pressure": "bar", "vibration": "mm/s",
+        "humidity": "%RH", "flow_rate": "L/min", "power": "kW",
+    }
+
+    def __init__(self, output_dir: Path):
+        self.output_dir = output_dir / "equipment-health"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def _health_label(self, score: float) -> str:
+        if score < HEALTH_SCORE_THRESHOLDS["Critical"]:
+            return "Critical"
+        elif score < HEALTH_SCORE_THRESHOLDS["Warning"]:
+            return "Warning"
+        elif score < HEALTH_SCORE_THRESHOLDS["Good"]:
+            return "Good"
+        return "Excellent"
+
+    def _sensor_status(self, sensor_type: str, value: float) -> str:
+        lo, hi = self.NORMAL_RANGES.get(sensor_type, (0, 999999))
+        if value > hi * 1.2 or value < lo * 0.8:
+            return "Critical"
+        elif value > hi or value < lo:
+            return "Elevated"
+        return "Normal"
+
+    def generate(self) -> int:
+        """Generate equipment health Markdown docs. Returns count."""
+        health_path = OUTPUT_GOLD / "equipment_health_scores.parquet"
+        if not health_path.exists():
+            print("  WARNING: equipment_health_scores.parquet not found. Run predictive_maintenance.py first.")
+            return 0
+
+        print("\n--- Loading data for Equipment Health docs ---")
+        health_df = pd.read_parquet(health_path)
+        # Telemetry is stored under iot/telemetry/ (not iot/iot_telemetry/)
+        tel_path = OUTPUT_BRONZE / "iot" / "telemetry" / "iot_telemetry.parquet"
+        if tel_path.exists():
+            telemetry = pd.read_parquet(tel_path)
+            print(f"  Loaded iot_telemetry: {len(telemetry):,} rows")
+        else:
+            print(f"  WARNING: {tel_path} not found, returning empty DataFrame")
+            telemetry = pd.DataFrame()
+
+        # Load lifecycle events if available
+        lifecycle_path = OUTPUT_BRONZE / "iot" / "telemetry" / "equipment_lifecycle_events.parquet"
+        lifecycle = pd.read_parquet(lifecycle_path) if lifecycle_path.exists() else pd.DataFrame()
+
+        # Pre-compute recent telemetry per equipment (last 90 days)
+        recent_telemetry = {}
+        anomaly_readings = {}
+        if not telemetry.empty and "event_timestamp" in telemetry.columns:
+            telemetry["_ts"] = pd.to_datetime(telemetry["event_timestamp"])
+            cutoff_90d = telemetry["_ts"].max() - timedelta(days=90)
+            recent = telemetry[telemetry["_ts"] >= cutoff_90d]
+
+            for eq_id, group in recent.groupby("equipment_id"):
+                recent_telemetry[eq_id] = group
+
+                # Anomalies: non-GOOD readings
+                anomalies = group[group["quality_flag"] != "GOOD"].nlargest(10, "_ts")
+                if not anomalies.empty:
+                    anomaly_readings[eq_id] = anomalies
+
+        # Lifecycle events per equipment
+        lifecycle_by_equip = {}
+        if not lifecycle.empty:
+            for eq_id, group in lifecycle.groupby("equipment_id"):
+                lifecycle_by_equip[eq_id] = group.sort_values("event_date", ascending=False).head(10)
+
+        print(f"\n--- Generating Equipment Health documents ({len(health_df):,} equipment) ---")
+        count = 0
+        for _, equip in tqdm(health_df.iterrows(), total=len(health_df), desc="Equipment Health"):
+            eq_id = equip["equipment_id"]
+            plant = equip.get("plant_code", "")
+            line = equip.get("production_line", "")
+            score = equip.get("health_score", 0)
+            risk = equip.get("failure_risk", "Unknown")
+            rul = equip.get("estimated_rul_days", 0)
+            last_maint = equip.get("last_maintenance_date", "N/A")
+            action = equip.get("recommended_action", "")
+
+            label = self._health_label(score)
+
+            # Parse sensor summary
+            sensor_summary = {}
+            raw_summary = equip.get("sensor_summary", "{}")
+            if isinstance(raw_summary, str):
+                try:
+                    sensor_summary = json.loads(raw_summary)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Parse risk factors
+            risk_factors = []
+            raw_factors = equip.get("top_risk_factors", "[]")
+            if isinstance(raw_factors, str):
+                try:
+                    risk_factors = json.loads(raw_factors)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Build Markdown
+            lines = []
+            lines.append(f"# Equipment Health Report: {eq_id}\n")
+
+            # Overview
+            lines.append("## Overview\n")
+            lines.append("| Field | Value |")
+            lines.append("|-------|-------|")
+            lines.append(f"| Equipment ID | {eq_id} |")
+            lines.append(f"| Plant | {plant} |")
+            lines.append(f"| Production Line | {line} |")
+            lines.append(f"| Health Score | {int(score)}/100 ({label}) |")
+            lines.append(f"| Failure Risk | {risk} |")
+            lines.append(f"| Estimated RUL | {rul} days |")
+            lines.append(f"| Last Maintenance | {last_maint} |")
+            lines.append("")
+
+            # Current Sensor Readings
+            if sensor_summary:
+                lines.append("## Current Sensor Readings (Latest)\n")
+                lines.append("| Sensor | Value | Normal Range | Status |")
+                lines.append("|--------|-------|-------------|--------|")
+                for stype, sval in sensor_summary.items():
+                    # sval may be a dict {"value": ..., "unit": ..., "timestamp": ...} or a scalar
+                    if isinstance(sval, dict):
+                        value = float(sval.get("value", 0))
+                        unit = sval.get("unit", self.SENSOR_UNITS.get(stype, ""))
+                    else:
+                        value = float(sval)
+                        unit = self.SENSOR_UNITS.get(stype, "")
+                    lo, hi = self.NORMAL_RANGES.get(stype, (0, 999))
+                    status = self._sensor_status(stype, value)
+                    lines.append(f"| {stype.replace('_', ' ').title()} | {value:.1f} {unit} | {lo}-{hi} {unit} | {status} |")
+                lines.append("")
+
+            # Trend Analysis (from recent telemetry)
+            eq_recent = recent_telemetry.get(eq_id)
+            if eq_recent is not None and not eq_recent.empty:
+                lines.append("## Trend Analysis (Last 90 Days)\n")
+                for stype in ["vibration", "temperature", "pressure", "power"]:
+                    sensor_data = eq_recent[eq_recent["measurement_type"] == stype]
+                    if len(sensor_data) >= 2:
+                        first_half = sensor_data.iloc[:len(sensor_data)//2]["measurement_value"].mean()
+                        second_half = sensor_data.iloc[len(sensor_data)//2:]["measurement_value"].mean()
+                        if first_half > 0:
+                            pct_change = ((second_half - first_half) / first_half) * 100
+                            arrow = "+" if pct_change > 0 else ""
+                            trend = "increasing" if pct_change > 5 else "decreasing" if pct_change < -5 else "stable"
+                            lines.append(f"- **{stype.replace('_', ' ').title()}**: {arrow}{pct_change:.0f}% ({trend})")
+                lines.append("")
+
+            # Anomaly History
+            eq_anomalies = anomaly_readings.get(eq_id)
+            if eq_anomalies is not None and not eq_anomalies.empty:
+                lines.append("## Anomaly History (Recent)\n")
+                lines.append("| Date | Sensor | Value | Quality |")
+                lines.append("|------|--------|-------|---------|")
+                for _, anom in eq_anomalies.head(5).iterrows():
+                    ts_str = str(anom.get("event_timestamp", ""))[:10]
+                    lines.append(
+                        f"| {ts_str} | {anom.get('measurement_type', '')} "
+                        f"| {anom.get('measurement_value', '')} {anom.get('measurement_unit', '')} "
+                        f"| {anom.get('quality_flag', '')} |"
+                    )
+                lines.append("")
+
+            # Maintenance History
+            eq_lifecycle = lifecycle_by_equip.get(eq_id)
+            if eq_lifecycle is not None and not eq_lifecycle.empty:
+                maint_events = eq_lifecycle[
+                    eq_lifecycle["event_type"].isin(["maintenance_start", "maintenance_complete", "failure"])
+                ]
+                if not maint_events.empty:
+                    lines.append("## Maintenance History\n")
+                    lines.append("| Date | Event | From State | To State |")
+                    lines.append("|------|-------|-----------|----------|")
+                    for _, evt in maint_events.head(5).iterrows():
+                        lines.append(
+                            f"| {str(evt.get('event_date', ''))[:10]} "
+                            f"| {evt.get('event_type', '')} "
+                            f"| {evt.get('state_from', '')} "
+                            f"| {evt.get('state_to', '')} |"
+                        )
+                    lines.append("")
+
+            # Recommended Actions
+            lines.append("## Recommended Actions\n")
+            if action:
+                lines.append(f"1. **{action}**")
+            if risk_factors:
+                for i, factor in enumerate(risk_factors[:3], start=2):
+                    fname = factor.get("feature", factor) if isinstance(factor, dict) else factor
+                    lines.append(f"{i}. Monitor: {str(fname).replace('_', ' ').title()}")
+            lines.append("")
+
+            # Risk Factors
+            if risk_factors:
+                lines.append("## Top Risk Factors\n")
+                for factor in risk_factors[:5]:
+                    if isinstance(factor, dict):
+                        fname = factor.get("feature", "unknown").replace("_", " ").title()
+                        fscore = factor.get("score", 0)
+                        lines.append(f"- **{fname}** (risk score: {fscore:.4f})")
+                    else:
+                        lines.append(f"- {factor}")
+                lines.append("")
+
+            md_content = "\n".join(lines)
+            safe_eq_id = eq_id.replace("/", "_")
+            file_path = self.output_dir / f"equipment_{safe_eq_id}.md"
+            file_path.write_text(md_content, encoding="utf-8")
+            count += 1
+
+        print(f"  Generated {count:,} equipment health documents")
+        return count
+
+
 def main():
     parser = argparse.ArgumentParser(description="Hybrid RAG Chunking Pipeline")
     parser.add_argument("--upload", action="store_true", help="Upload to ADLS Gen2 after generation")
@@ -421,21 +659,27 @@ def main():
     print("=" * 60)
 
     # Step 1: Customer 360
-    print("\n[1/2] Customer 360 Documents")
+    print("\n[1/3] Customer 360 Documents")
     c360 = Customer360Generator(OUTPUT_RAG)
     c360_count = c360.generate()
 
     # Step 2: Transaction-level
-    print("\n[2/2] Transaction-Level Documents")
+    print("\n[2/3] Transaction-Level Documents")
     txn = TransactionDocGenerator(OUTPUT_RAG)
     txn_count = txn.generate()
+
+    # Step 3: Equipment Health
+    print("\n[3/3] Equipment Health Documents")
+    equip = EquipmentHealthGenerator(OUTPUT_RAG)
+    equip_count = equip.generate()
 
     elapsed = time.time() - start
     print("\n" + "=" * 60)
     print(f"RAG chunking complete in {elapsed:.1f}s")
-    print(f"  Customer 360:  {c360_count:,} documents")
-    print(f"  Transactions:  {txn_count:,} documents")
-    print(f"  Total:         {c360_count + txn_count:,} documents")
+    print(f"  Customer 360:      {c360_count:,} documents")
+    print(f"  Transactions:      {txn_count:,} documents")
+    print(f"  Equipment Health:  {equip_count:,} documents")
+    print(f"  Total:             {c360_count + txn_count + equip_count:,} documents")
     print("=" * 60)
 
     if args.upload:

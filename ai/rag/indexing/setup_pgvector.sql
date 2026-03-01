@@ -334,6 +334,193 @@ COMMENT ON FUNCTION search_product_catalog_hybrid IS
 
 
 -- ---------------------------------------------------------------------------
+-- Step 5b: Document Embeddings Search Functions
+-- Used for equipment health, customer 360, and other non-product documents
+-- ---------------------------------------------------------------------------
+
+-- Function: Semantic search on document_embeddings
+CREATE OR REPLACE FUNCTION search_documents_semantic(
+    query_embedding vector(1536),
+    match_count INTEGER DEFAULT 5,
+    min_similarity FLOAT DEFAULT 0.3,
+    document_type_filter TEXT DEFAULT NULL,
+    metadata_filter JSONB DEFAULT NULL
+)
+RETURNS TABLE (
+    id TEXT,
+    document_id TEXT,
+    content TEXT,
+    document_type TEXT,
+    metadata JSONB,
+    source_file TEXT,
+    similarity FLOAT
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        de.id,
+        de.document_id,
+        de.content,
+        de.document_type,
+        de.metadata,
+        de.source_file,
+        (1 - (de.embedding <=> query_embedding))::FLOAT AS similarity
+    FROM document_embeddings de
+    WHERE
+        (document_type_filter IS NULL OR de.document_type = document_type_filter)
+        AND (metadata_filter IS NULL OR de.metadata @> metadata_filter)
+        AND (1 - (de.embedding <=> query_embedding)) >= min_similarity
+    ORDER BY de.embedding <=> query_embedding
+    LIMIT match_count;
+END;
+$$;
+
+COMMENT ON FUNCTION search_documents_semantic IS
+    'Semantic search on document_embeddings with optional document_type filter. '
+    'Use document_type_filter=''equipment_health'' for predictive maintenance queries.';
+
+
+-- Function: Full-text keyword search on document_embeddings
+CREATE OR REPLACE FUNCTION search_documents_keyword(
+    search_query TEXT,
+    match_count INTEGER DEFAULT 5,
+    document_type_filter TEXT DEFAULT NULL,
+    metadata_filter JSONB DEFAULT NULL
+)
+RETURNS TABLE (
+    id TEXT,
+    document_id TEXT,
+    content TEXT,
+    document_type TEXT,
+    metadata JSONB,
+    source_file TEXT,
+    rank_score FLOAT
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    tsquery_val tsquery;
+BEGIN
+    tsquery_val := plainto_tsquery('english', search_query);
+
+    RETURN QUERY
+    SELECT
+        de.id,
+        de.document_id,
+        de.content,
+        de.document_type,
+        de.metadata,
+        de.source_file,
+        ts_rank_cd(de.content_tsv, tsquery_val)::FLOAT AS rank_score
+    FROM document_embeddings de
+    WHERE
+        de.content_tsv @@ tsquery_val
+        AND (document_type_filter IS NULL OR de.document_type = document_type_filter)
+        AND (metadata_filter IS NULL OR de.metadata @> metadata_filter)
+    ORDER BY rank_score DESC
+    LIMIT match_count;
+END;
+$$;
+
+COMMENT ON FUNCTION search_documents_keyword IS
+    'Full-text keyword search on document_embeddings with optional document_type filter.';
+
+
+-- Function: Hybrid search on document_embeddings with RRF
+CREATE OR REPLACE FUNCTION search_documents_hybrid(
+    query_embedding vector(1536),
+    search_query TEXT,
+    match_count INTEGER DEFAULT 5,
+    semantic_weight FLOAT DEFAULT 0.7,
+    keyword_weight FLOAT DEFAULT 0.3,
+    rrf_k INTEGER DEFAULT 60,
+    document_type_filter TEXT DEFAULT NULL,
+    metadata_filter JSONB DEFAULT NULL
+)
+RETURNS TABLE (
+    id TEXT,
+    document_id TEXT,
+    content TEXT,
+    document_type TEXT,
+    metadata JSONB,
+    source_file TEXT,
+    semantic_score FLOAT,
+    keyword_score FLOAT,
+    combined_score FLOAT
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    WITH semantic_results AS (
+        SELECT
+            s.id,
+            s.document_id,
+            s.content,
+            s.document_type,
+            s.metadata,
+            s.source_file,
+            s.similarity AS sem_score,
+            ROW_NUMBER() OVER (ORDER BY s.similarity DESC) AS sem_rank
+        FROM search_documents_semantic(
+            query_embedding, match_count * 3, 0.1, document_type_filter, metadata_filter
+        ) s
+    ),
+    keyword_results AS (
+        SELECT
+            k.id,
+            k.document_id,
+            k.content,
+            k.document_type,
+            k.metadata,
+            k.source_file,
+            k.rank_score AS kw_score,
+            ROW_NUMBER() OVER (ORDER BY k.rank_score DESC) AS kw_rank
+        FROM search_documents_keyword(
+            search_query, match_count * 3, document_type_filter, metadata_filter
+        ) k
+    ),
+    combined AS (
+        SELECT
+            COALESCE(s.id, k.id) AS id,
+            COALESCE(s.document_id, k.document_id) AS document_id,
+            COALESCE(s.content, k.content) AS content,
+            COALESCE(s.document_type, k.document_type) AS document_type,
+            COALESCE(s.metadata, k.metadata) AS metadata,
+            COALESCE(s.source_file, k.source_file) AS source_file,
+            COALESCE(s.sem_score, 0)::FLOAT AS semantic_score,
+            COALESCE(k.kw_score, 0)::FLOAT AS keyword_score,
+            (
+                COALESCE(semantic_weight / (rrf_k + s.sem_rank), 0) +
+                COALESCE(keyword_weight / (rrf_k + k.kw_rank), 0)
+            )::FLOAT AS combined_score
+        FROM semantic_results s
+        FULL OUTER JOIN keyword_results k ON s.id = k.id
+    )
+    SELECT
+        c.id,
+        c.document_id,
+        c.content,
+        c.document_type,
+        c.metadata,
+        c.source_file,
+        c.semantic_score,
+        c.keyword_score,
+        c.combined_score
+    FROM combined c
+    ORDER BY c.combined_score DESC
+    LIMIT match_count;
+END;
+$$;
+
+COMMENT ON FUNCTION search_documents_hybrid IS
+    'Hybrid search on document_embeddings combining semantic and keyword search '
+    'with RRF scoring. Filter by document_type (e.g., equipment_health, customer_360).';
+
+
+-- ---------------------------------------------------------------------------
 -- Step 6: Maintenance Functions
 -- ---------------------------------------------------------------------------
 
@@ -425,7 +612,7 @@ BEGIN
 
     SELECT COUNT(*) INTO func_count
     FROM information_schema.routines
-    WHERE routine_name LIKE 'search_product_catalog%'
+    WHERE (routine_name LIKE 'search_product_catalog%' OR routine_name LIKE 'search_documents%')
     AND routine_schema = 'public';
 
     RAISE NOTICE '=== pgvector Setup Verification ===';

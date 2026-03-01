@@ -245,6 +245,26 @@ class ProductCatalogParser:
         if heading_match:
             title = heading_match.group(1).strip()
 
+        # Detect document type from filename pattern
+        doc_type = "product_documentation"
+        extra_metadata: dict = {}
+        if file_path.name.startswith("equipment_"):
+            doc_type = "equipment_health"
+            eq_match = re.search(r"EQ-\d+-\w+-\d+", content)
+            if eq_match:
+                extra_metadata["equipment_id"] = eq_match.group(0)
+            hs_match = re.search(r"Health Score\s*\|\s*(\d+)/100", content)
+            if hs_match:
+                extra_metadata["health_score"] = int(hs_match.group(1))
+            risk_match = re.search(r"Failure Risk\s*\|\s*(\w+)", content)
+            if risk_match:
+                extra_metadata["failure_risk"] = risk_match.group(1)
+        elif file_path.name.startswith("customer_"):
+            doc_type = "customer_360"
+            kunnr_match = re.search(r"SAP Customer \(KUNNR\)\s*\|\s*(\d+)", content)
+            if kunnr_match:
+                extra_metadata["customer_number"] = kunnr_match.group(1)
+
         chunks = []
         for i, chunk_text in enumerate(chunks_text):
             chunks.append(
@@ -256,7 +276,8 @@ class ProductCatalogParser:
                     metadata={
                         "title": title,
                         "file_type": file_path.suffix,
-                        "document_type": "product_documentation",
+                        "document_type": doc_type,
+                        **extra_metadata,
                     },
                     chunk_index=i,
                     total_chunks=len(chunks_text),

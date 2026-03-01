@@ -103,6 +103,32 @@ IOT_DEVICE_TYPES = ["temperature", "pressure", "vibration", "humidity", "flow_ra
 IOT_PRODUCTION_LINES = ["LINE-A", "LINE-B", "LINE-C", "LINE-D"]
 
 # ============================================================================
+# ML / Predictive Maintenance Configuration
+# ============================================================================
+OUTPUT_ML_MODELS = OUTPUT_DIR / "ml-models"
+OUTPUT_ML_FEATURES = OUTPUT_DIR / "ml-features"
+OUTPUT_GOLD = OUTPUT_DIR / "gold"
+
+# Equipment health thresholds for RAG document status labels
+HEALTH_SCORE_THRESHOLDS = {
+    "Critical": 25,
+    "Warning": 50,
+    "Good": 75,
+    "Excellent": 100,
+}
+
+# Random Forest model hyperparameters
+PM_MODEL_PARAMS = {
+    "n_estimators": 100,
+    "max_depth": 12,
+    "random_state": RANDOM_SEED,
+    "class_weight": "balanced",
+}
+
+PM_FEATURE_WINDOW_DAYS = 7       # Rolling window for feature computation
+PM_PREDICTION_HORIZON_DAYS = 30  # How far ahead to predict failure
+
+# ============================================================================
 # RAG Chunking Configuration (used by chunk_for_rag.py)
 # ============================================================================
 RAG_LARGE_ORDER_THRESHOLD = 50_000   # Orders > $50K get individual RAG docs

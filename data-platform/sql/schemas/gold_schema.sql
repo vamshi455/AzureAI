@@ -244,3 +244,89 @@ TBLPROPERTIES (
     'delta.autoOptimize.autoCompact' = 'true',
     'quality' = 'gold'
 );
+
+
+-- ---------------------------------------------------------------------------
+-- iot_equipment_health: Predictive maintenance health scores per equipment
+-- Grain: One row per equipment (latest prediction)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS lh_gold.iot_equipment_health (
+    -- Keys
+    equipment_id                STRING          NOT NULL    COMMENT 'Equipment identifier (business key)',
+
+    -- Dimension Attributes
+    plant_code                  STRING          NOT NULL    COMMENT 'SAP plant code',
+    production_line             STRING          NOT NULL    COMMENT 'Production line identifier',
+    device_ids                  STRING                      COMMENT 'Comma-separated sensor device IDs',
+
+    -- Health Metrics (from ML model)
+    health_score                DECIMAL(5, 2)               COMMENT 'Overall health score 0-100 (100 = perfect)',
+    failure_risk                STRING                      COMMENT 'Risk category: Low / Medium / High / Critical',
+    failure_probability         DECIMAL(5, 4)               COMMENT 'Probability of failure within prediction horizon',
+    estimated_rul_days          INT                         COMMENT 'Estimated remaining useful life in days',
+
+    -- Maintenance
+    last_maintenance_date       DATE                        COMMENT 'Date of last maintenance event',
+    next_recommended_date       DATE                        COMMENT 'Recommended next maintenance date',
+    recommended_action          STRING                      COMMENT 'Recommended maintenance action text',
+
+    -- Sensor & Anomaly Summary
+    anomaly_count_30d           INT                         COMMENT 'Anomaly count in last 30 days',
+    top_risk_factors            STRING                      COMMENT 'JSON array of top risk factor descriptions',
+    sensor_summary              STRING                      COMMENT 'JSON object: latest readings per sensor type',
+
+    -- Model Metadata
+    model_version               STRING                      COMMENT 'ML model version used for predictions',
+    computed_at                 TIMESTAMP                   COMMENT 'Timestamp when predictions were computed',
+
+    -- Metadata
+    _gold_loaded_at             TIMESTAMP                   COMMENT 'Gold layer load timestamp',
+    _gold_pipeline_run_id       STRING                      COMMENT 'Pipeline run ID'
+)
+USING DELTA
+COMMENT 'Equipment health predictions from predictive maintenance ML model. Grain: one row per equipment.'
+TBLPROPERTIES (
+    'delta.autoOptimize.optimizeWrite' = 'true',
+    'quality' = 'gold'
+);
+
+
+-- ---------------------------------------------------------------------------
+-- agg_equipment_metrics: Monthly equipment health and sensor aggregations
+-- Grain: One row per equipment + month
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS lh_gold.agg_equipment_metrics (
+    -- Keys
+    equipment_id                STRING          NOT NULL    COMMENT 'Equipment identifier',
+    plant_code                  STRING          NOT NULL    COMMENT 'Plant code',
+    month_start                 DATE            NOT NULL    COMMENT 'First day of the month',
+
+    -- Sensor Metrics (monthly aggregates)
+    avg_temperature             DOUBLE                      COMMENT 'Monthly average temperature reading (C)',
+    avg_vibration               DOUBLE                      COMMENT 'Monthly average vibration reading (mm/s)',
+    avg_pressure                DOUBLE                      COMMENT 'Monthly average pressure reading (bar)',
+    avg_power                   DOUBLE                      COMMENT 'Monthly average power consumption (kW)',
+    max_vibration               DOUBLE                      COMMENT 'Monthly maximum vibration peak (mm/s)',
+    max_temperature             DOUBLE                      COMMENT 'Monthly maximum temperature peak (C)',
+
+    -- Quality & Anomaly Metrics
+    total_readings              BIGINT                      COMMENT 'Total sensor readings in month',
+    anomaly_count               BIGINT                      COMMENT 'Readings with quality_flag != GOOD',
+    bad_reading_pct             DOUBLE                      COMMENT 'Percentage of BAD quality readings',
+
+    -- Health Tracking
+    avg_health_score            DOUBLE                      COMMENT 'Average health score over month',
+    min_health_score            DOUBLE                      COMMENT 'Minimum health score in month',
+    maintenance_events          INT                         COMMENT 'Number of maintenance events in month',
+
+    -- Metadata
+    _gold_loaded_at             TIMESTAMP                   COMMENT 'Gold layer load timestamp',
+    _gold_pipeline_run_id       STRING                      COMMENT 'Pipeline run ID'
+)
+USING DELTA
+COMMENT 'Monthly equipment health and sensor metrics for trend analysis. Grain: equipment + month.'
+TBLPROPERTIES (
+    'delta.autoOptimize.optimizeWrite' = 'true',
+    'delta.autoOptimize.autoCompact' = 'true',
+    'quality' = 'gold'
+);

@@ -1,0 +1,5 @@
+azure-identity>=1.19.0
+azure-purview-scanning>=1.0.0b2
+azure-purview-catalog>=1.0.0b4
+azure-purview-datamap>=1.0.0b1
+requests>=2.31.0

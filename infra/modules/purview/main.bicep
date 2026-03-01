@@ -55,14 +55,17 @@ resource purviewAccount 'Microsoft.Purview/accounts@2021-12-01' = {
 // Role Assignments
 // ============================================================================
 
-// Purview Data Curator role for the platform identity
-var purviewDataCuratorRoleId = 'e89c7235-2f73-4c5c-9a04-3a80c8412708'
+// Contributor role for the platform identity on the Purview account
+// Note: Purview Data Curator is a Purview-internal role managed via the
+// Purview governance portal, not ARM RBAC. We use Contributor here for
+// ARM-level management; Purview-level roles are configured post-deployment.
+var contributorRoleId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
 
-resource purviewDataCuratorAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(purviewAccount.id, platformIdentityPrincipalId, purviewDataCuratorRoleId)
+resource purviewContributorAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(purviewAccount.id, platformIdentityPrincipalId, contributorRoleId)
   scope: purviewAccount
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', purviewDataCuratorRoleId)
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', contributorRoleId)
     principalId: platformIdentityPrincipalId
     principalType: 'ServicePrincipal'
   }

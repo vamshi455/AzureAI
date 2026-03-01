@@ -328,13 +328,54 @@ psql "host=$PSQL_SERVER.postgres.database.azure.com \
 
 ### 5.4 Configure Microsoft Purview
 
-1. Open Purview governance portal
-2. Register data sources:
-   - Fabric Lakehouse
-   - PostgreSQL Flexible Server
-3. Create scan rule sets for each source
-4. Configure classification rules for PII detection
-5. Set up scheduled scans
+> See `documentation/runbooks/purview-governance.md` for the full governance runbook.
+
+#### 5.4.1 Run Governance Scripts (Automated)
+
+```bash
+cd scripts/governance
+pip install -r requirements.txt
+
+# Register data sources and configure scans
+python register_sources.py
+
+# Configure scans and trigger initial scan
+python configure_scans.py --run-now
+
+# Create business glossary (4 categories, 20 terms)
+python create_glossary.py
+
+# Create custom classification rules (5 custom + 7 built-in SITs)
+python create_classifications.py
+
+# Verify all governance configuration
+python verify_governance.py
+```
+
+#### 5.4.2 Configure Sensitivity Labels (Manual)
+
+1. Navigate to `compliance.microsoft.com` > Information Protection > Labels
+2. Create labels: Public, General, Confidential, Highly Confidential, Restricted
+3. Publish label policy targeting all users
+4. See `documentation/runbooks/purview-governance.md` Section 3 for details
+
+#### 5.4.3 Configure DLP Policies (Manual)
+
+1. Navigate to `compliance.microsoft.com` > Data Loss Prevention > Policies
+2. Create policies: Block PII Export, Alert Financial Data Share, Enforce Encryption
+3. Start in Test mode for 2 weeks before enforcement
+4. See `documentation/runbooks/purview-governance.md` Section 4 for details
+
+#### 5.4.4 Verification Checklist
+
+- [ ] ADLS Gen2 registered as data source in Purview
+- [ ] Initial scan completed successfully
+- [ ] Weekly scan schedule configured (Sunday 2 AM UTC)
+- [ ] Business glossary created with 20 terms across 4 categories
+- [ ] Custom classification rules (5) created and enabled
+- [ ] Built-in SITs (7) enabled in scan rule set
+- [ ] Sensitivity labels created and published (manual)
+- [ ] DLP policies in test mode (manual)
 
 ### 5.5 Configure AI Foundry
 

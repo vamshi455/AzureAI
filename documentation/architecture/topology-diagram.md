@@ -43,7 +43,7 @@
 │  │  │  └──────────┘                                                      │  │  │
 │  │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐                          │  │  │
 │  │  │  │AI FOUNDRY│ │ PURVIEW  │ │  PLANE   │                          │  │  │
-│  │  │  │  ⏸ Skip │ │ ⏸ Skip  │ │  ⏸ Skip │                          │  │  │
+│  │  │  │  ⏸ Skip │ │  ✅ Live │ │  ⏸ Skip │                          │  │  │
 │  │  │  └──────────┘ └──────────┘ └──────────┘                          │  │  │
 │  │  └─────────────────────────────────────────────────────────────────────┘  │  │
 │  └───────────────────────────────────────────────────────────────────────────┘  │
@@ -86,6 +86,14 @@
           │                  │       │  │ │(active)│ │  │
           │                  │       │  │ ├────────┤ │  │
           │                  │       │  │ │PE:DFS  │ │  │
+          │                  │       │  │ │(active)│ │  │
+          │                  │       │  │ ├────────┤ │  │
+          │                  │       │  │ │PE:Purv.│ │  │
+          │                  │       │  │ │Account │ │  │
+          │                  │       │  │ │(active)│ │  │
+          │                  │       │  │ ├────────┤ │  │
+          │                  │       │  │ │PE:Purv.│ │  │
+          │                  │       │  │ │Portal  │ │  │
           │                  │       │  │ │(active)│ │  │
           │                  │       │  │ └────────┘ │  │
           │                  │       │  └────────────┘  │
@@ -214,8 +222,20 @@ dp-rg-dev (Resource Group)
 ├── AI FOUNDRY (⏸ not deployed) ─────────────────────────────
 │   └── Enable with: enableAIFoundry=true (usage-based)
 │
-├── PURVIEW (⏸ not deployed) ────────────────────────────────
-│   └── Enable with: enablePurview=true (usage-based)
+├── PURVIEW (DATA GOVERNANCE) ──────────────────────────────
+│   ├── dp-pview-dev                 Purview Account
+│   │   ├── System-Assigned MI (Storage Blob Data Reader)
+│   │   ├── Public Access: Disabled
+│   │   ├── Managed RG: dp-rg-pview-managed-dev
+│   │   ├── Data Sources: ADLS Gen2 lakehouse, PostgreSQL
+│   │   ├── Scan Schedule: Weekly (Sunday 2 AM UTC)
+│   │   ├── Business Glossary: 20 terms / 4 categories
+│   │   ├── Custom Classifications: 5 rules + 7 built-in SITs
+│   │   └── Diagnostic Settings → dp-log-dev
+│   ├── dp-pe-pview-account-dev      Private Endpoint (account)
+│   │   └── DNS: privatelink.purview.azure.com
+│   └── dp-pe-pview-portal-dev       Private Endpoint (portal)
+│       └── DNS: privatelink.purview.azure.com
 │
 └── PLANE TICKETING (⏸ not deployed) ────────────────────────
     └── Enable with: enablePlane=true (~$30/mo)
@@ -263,6 +283,23 @@ dp-rg-dev (Resource Group)
                    │  │ → Equipment RAG docs      │    │       │
                    │  └──────────────────────────┘    │       │
                    └──────────────────────────────────┘       │
+                               ▲                              │
+                               │ Scan (MSI auth)              │
+                   ┌───────────┴─────────────────────┐        │
+                   │  PURVIEW (DATA GOVERNANCE)       │        │
+                   │  dp-pview-dev                    │        │
+                   │  ┌──────────┐ ┌────────────────┐ │        │
+                   │  │Data Map  │ │Business Glossary│ │        │
+                   │  │(weekly   │ │(20 terms, SAP/ │ │        │
+                   │  │ scans)   │ │ CRM/IoT/Plat.) │ │        │
+                   │  └──────────┘ └────────────────┘ │        │
+                   │  ┌──────────┐ ┌────────────────┐ │        │
+                   │  │PII       │ │Sensitivity     │ │        │
+                   │  │Detection │ │Labels + DLP    │ │        │
+                   │  │(5 custom │ │(Compliance     │ │        │
+                   │  │ + 7 SIT) │ │ Portal)        │ │        │
+                   │  └──────────┘ └────────────────┘ │        │
+                   └──────────────────────────────────┘        │
                                                               │
                    ┌──────────────────────────────────────────┘
                    │
@@ -402,11 +439,11 @@ dp-rg-dev (Resource Group)
 ## Quick Reference - Enable Resources
 
 ```bash
-# Current deployment (core + storage, ~$5-15/mo):
+# Current deployment (core + storage + purview, ~$5-20/mo):
 az deployment sub create --location eastus2 --template-file infra/main.bicep \
   --parameters environment='dev' keyVaultAdminObjectId='b8f43d7c-...' \
-  enableStorage=true enableFabric=false enableAppService=false \
-  enablePostgresql=false enablePurview=false enableAIFoundry=false enablePlane=false
+  enableStorage=true enablePurview=true enableFabric=false enableAppService=false \
+  enablePostgresql=false enableAIFoundry=false enablePlane=false
 
 # Add PostgreSQL (+~$50/mo):
 #   enablePostgresql=true postgresAdminLogin=pgadmin postgresAdminPassword='...'

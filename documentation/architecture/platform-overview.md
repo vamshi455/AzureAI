@@ -12,6 +12,7 @@
 - [AI Architecture](#ai-architecture)
 - [Application Architecture](#application-architecture)
 - [Security Model](#security-model)
+- [Data Governance](#data-governance)
 - [Cost Optimization Strategy](#cost-optimization-strategy)
 
 ---
@@ -393,6 +394,57 @@ User Query  ------------>|  1. Query embedding via AI Foundry          |
 - Microsoft Defender for Cloud enabled
 - Regular access reviews via Entra ID
 - Purview data lineage for audit trail
+
+---
+
+## Data Governance
+
+Data governance is implemented through Microsoft Purview, following the LivaNova
+Fabric Development Framework (Section 5). See `documentation/runbooks/purview-governance.md`
+for the full governance runbook.
+
+### Governance Architecture
+
+| Component | Purpose | Configuration |
+|-----------|---------|---------------|
+| Data Map | Automated discovery and scanning of data assets | `scripts/governance/` (SDK) |
+| Unified Catalog | Searchable catalog with business glossary | Automated via SDK |
+| Classifications | PII detection and custom data classification | Automated via SDK |
+| Sensitivity Labels | Information protection labels | Compliance Portal (manual) |
+| DLP Policies | Data loss prevention enforcement | Compliance Portal (manual) |
+| Lineage | Source-to-report data lineage tracking | Automatic via Fabric/ADF |
+
+### Governance Roles
+
+| Role | Responsibility | Identity |
+|------|---------------|----------|
+| Data Curator | Manage catalog, approve access | `dp-id-platform-dev` (MI) |
+| Data Source Admin | Register sources, configure scans | `dp-id-platform-dev` (MI) |
+| Data Steward | Manage glossary, review classifications | Team members (Entra ID) |
+| Compliance Officer | Manage sensitivity labels, DLP | Entra ID user (manual) |
+
+### Separation of Concerns
+
+**Key Principle:** Purview defines policies and metadata; Fabric enforces runtime access.
+
+| Capability | Managed In | Rationale |
+|------------|-----------|-----------|
+| Data Catalog | Purview | Central catalog across all data sources |
+| Data Lineage | Purview | End-to-end lineage including non-Fabric sources |
+| Sensitivity Labels | Purview | Enterprise-wide label definitions |
+| Data Classification | Purview | Automated scanning and labeling |
+| Data Access Control | Fabric | Runtime access enforcement for Fabric data |
+| Workspace Permissions | Fabric | Operational access to Fabric workloads |
+
+### Custom Classifications
+
+| Classification | Target Data | Compliance |
+|---------------|-------------|-----------|
+| CUSTOM_CUSTOMER_DATA | Customer PII (names, addresses, emails) | GDPR/CCPA |
+| CUSTOM_FINANCIAL_DATA | Financial values (pricing, billing) | SOX |
+| CUSTOM_EMPLOYEE_DATA | Employee data | Internal privacy |
+| CUSTOM_MANUFACTURING_IP | Trade secrets (formulas, specs) | Competitive protection |
+| CUSTOM_REGULATORY_DATA | Batch/lot tracking, quality | FDA/SEC/EMA |
 
 ---
 

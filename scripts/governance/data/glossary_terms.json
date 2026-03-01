@@ -1,0 +1,204 @@
+{
+  "glossary": {
+    "name": "Manufacturing & Sales Data Platform Glossary",
+    "qualifiedName": "ManufacturingSalesGlossary",
+    "shortDescription": "Business glossary for the Manufacturing & Sales Data Platform, mapping SAP ERP, Salesforce CRM, IoT, and platform-level terms."
+  },
+  "categories": [
+    {
+      "name": "SAP ERP",
+      "shortDescription": "Terms from SAP S/4HANA Sales & Distribution module"
+    },
+    {
+      "name": "Salesforce CRM",
+      "shortDescription": "Terms from Salesforce CRM system"
+    },
+    {
+      "name": "IoT Telemetry",
+      "shortDescription": "Terms from manufacturing IoT sensor data and predictive maintenance"
+    },
+    {
+      "name": "Data Platform",
+      "shortDescription": "Cross-system and platform-level business concepts"
+    }
+  ],
+  "terms": [
+    {
+      "name": "Customer Number",
+      "shortDescription": "Unique identifier for a customer account",
+      "longDescription": "The primary key for a customer in the SAP system (KNA1.KUNNR). A 10-digit padded numeric identifier. Maps to Salesforce Account.Id via cross-system linkage in the Silver layer.",
+      "category": "SAP ERP",
+      "abbreviation": "KUNNR",
+      "status": "Approved",
+      "relatedAssets": ["bronze/erp_sap/kna1/"]
+    },
+    {
+      "name": "Material Number",
+      "shortDescription": "Unique identifier for a product or raw material",
+      "longDescription": "The primary key for a material in the SAP system (MARA.MATNR). 18-character padded identifier. Maps to Salesforce Product2.ProductCode.",
+      "category": "SAP ERP",
+      "abbreviation": "MATNR",
+      "status": "Approved",
+      "relatedAssets": ["bronze/erp_sap/mara/"]
+    },
+    {
+      "name": "Sales Document Number",
+      "shortDescription": "Unique identifier for a sales order",
+      "longDescription": "Primary key in VBAK (Sales Order Header). A 10-character document number that links to VBAP (items), LIKP/LIPS (deliveries), and VBRK/VBRP (billing).",
+      "category": "SAP ERP",
+      "abbreviation": "VBELN",
+      "status": "Approved",
+      "relatedAssets": ["bronze/erp_sap/vbak/", "bronze/erp_sap/vbap/"]
+    },
+    {
+      "name": "Net Value",
+      "shortDescription": "Net monetary value of a sales document or line item",
+      "longDescription": "The net value (NETWR) of a sales order or billing document, in the document currency (WAERK). Excludes tax. Found in VBAK, VBAP, VBRK, VBRP.",
+      "category": "SAP ERP",
+      "abbreviation": "NETWR",
+      "status": "Approved",
+      "relatedAssets": ["bronze/erp_sap/vbak/", "bronze/erp_sap/vbrk/"]
+    },
+    {
+      "name": "Customer Name",
+      "shortDescription": "Legal name of the customer organization",
+      "longDescription": "The business name (KNA1.NAME1). Contains PII — classified as Confidential. Maps to Salesforce Account.Name.",
+      "category": "SAP ERP",
+      "abbreviation": "NAME1",
+      "status": "Approved",
+      "pii": true,
+      "sensitivityLabel": "Confidential",
+      "relatedAssets": ["bronze/erp_sap/kna1/"]
+    },
+    {
+      "name": "Street Address",
+      "shortDescription": "Customer street address line",
+      "longDescription": "Physical street address (KNA1.STRAS). Contains PII — classified as Restricted. Used for shipping and billing.",
+      "category": "SAP ERP",
+      "abbreviation": "STRAS",
+      "status": "Approved",
+      "pii": true,
+      "sensitivityLabel": "Restricted",
+      "relatedAssets": ["bronze/erp_sap/kna1/"]
+    },
+    {
+      "name": "Sales Organization",
+      "shortDescription": "Organizational unit responsible for sales",
+      "longDescription": "SAP organizational unit (VKORG) that manages sales. Values: 1000, 2000, 3000. Each has distinct pricing and distribution rules.",
+      "category": "SAP ERP",
+      "abbreviation": "VKORG",
+      "status": "Approved",
+      "relatedAssets": ["bronze/erp_sap/vbak/"]
+    },
+    {
+      "name": "Currency",
+      "shortDescription": "ISO currency code for monetary values",
+      "longDescription": "Document currency (WAERK) in ISO 4217 format. Platform supports: USD, EUR, GBP, JPY, CAD.",
+      "category": "SAP ERP",
+      "abbreviation": "WAERK",
+      "status": "Approved",
+      "relatedAssets": ["bronze/erp_sap/vbak/", "bronze/erp_sap/vbrk/"]
+    },
+    {
+      "name": "Created Date",
+      "shortDescription": "Date when the record was created in the source system",
+      "longDescription": "SAP creation date (ERDAT) in YYYYMMDD format. Used as watermark column for incremental loads. Also maps to Salesforce CreatedDate.",
+      "category": "SAP ERP",
+      "abbreviation": "ERDAT",
+      "status": "Approved",
+      "relatedAssets": ["bronze/erp_sap/vbak/", "bronze/erp_sap/kna1/"]
+    },
+    {
+      "name": "Account",
+      "shortDescription": "A company or organization that is a customer or prospect",
+      "longDescription": "Salesforce Account entity representing a business customer. Cross-referenced with SAP KNA1 via Account.Id to KUNNR mapping in the Silver layer.",
+      "category": "Salesforce CRM",
+      "status": "Approved",
+      "relatedAssets": ["bronze/crm_salesforce/accounts/"]
+    },
+    {
+      "name": "Contact",
+      "shortDescription": "An individual associated with an Account",
+      "longDescription": "Salesforce Contact entity. Contains PII fields: email, phone, mailing_address. Classified as Restricted. 30,000 records in platform.",
+      "category": "Salesforce CRM",
+      "status": "Approved",
+      "pii": true,
+      "sensitivityLabel": "Restricted",
+      "relatedAssets": ["bronze/crm_salesforce/contacts/"]
+    },
+    {
+      "name": "Opportunity",
+      "shortDescription": "A potential sales deal being tracked through the pipeline",
+      "longDescription": "Salesforce Opportunity entity tracking deal progression through stages: Prospecting, Qualification, Needs Analysis, Value Proposition, Negotiation, Closed Won, Closed Lost. 50,000 records.",
+      "category": "Salesforce CRM",
+      "status": "Approved",
+      "relatedAssets": ["bronze/crm_salesforce/opportunities/"]
+    },
+    {
+      "name": "Lead",
+      "shortDescription": "A potential customer not yet qualified as an Opportunity",
+      "longDescription": "Salesforce Lead entity. Contains PII (email, phone). Sources: Web, Trade Show, Referral, Partner, Cold Call, Advertisement, Email Campaign.",
+      "category": "Salesforce CRM",
+      "status": "Approved",
+      "pii": true,
+      "sensitivityLabel": "Confidential",
+      "relatedAssets": ["bronze/crm_salesforce/leads/"]
+    },
+    {
+      "name": "Equipment Health Score",
+      "shortDescription": "ML-derived health rating (0-100) for manufacturing equipment",
+      "longDescription": "Predicted health score from the Random Forest predictive maintenance model (90% accuracy, 39 features). Thresholds: Critical (<25), High (<50), Medium (<75), Low (>=75). Stored in gold/equipment_health_scores.parquet.",
+      "category": "IoT Telemetry",
+      "status": "Approved",
+      "relatedAssets": ["gold/equipment_health_scores.parquet", "rag-documents/equipment-health/"]
+    },
+    {
+      "name": "IoT Telemetry",
+      "shortDescription": "Real-time sensor readings from manufacturing equipment",
+      "longDescription": "Sensor data from 200 devices across 5 plants and 4 production lines (LINE-A through LINE-D). Sensor types: temperature, pressure, vibration, humidity, flow_rate, power. Equipment follows lifecycle state machine: HEALTHY -> DEGRADING -> WARNING -> CRITICAL -> FAILED -> MAINTAINED. 500K records in bronze layer.",
+      "category": "IoT Telemetry",
+      "status": "Approved",
+      "relatedAssets": ["bronze/iot/telemetry/"]
+    },
+    {
+      "name": "Failure Risk",
+      "shortDescription": "Predicted risk level for equipment failure within the next 30 days",
+      "longDescription": "Classification from the predictive maintenance ML model. Classes: Low, Medium, High, Critical. Based on sensor feature aggregation with key predictors: bad_reading_pct (16%), anomaly_count (13%), temperature_mean (5.3%).",
+      "category": "IoT Telemetry",
+      "status": "Approved",
+      "relatedAssets": ["gold/equipment_health_scores.parquet"]
+    },
+    {
+      "name": "Medallion Layer",
+      "shortDescription": "The bronze/silver/gold tier of the data lakehouse architecture",
+      "longDescription": "Three-layer architecture: Bronze = raw immutable data (Parquet, append-only); Silver = cleansed, validated, conformed, deduped (Delta); Gold = business aggregates, star schemas, ML features (Delta).",
+      "category": "Data Platform",
+      "status": "Approved",
+      "relatedAssets": ["bronze/", "silver/", "gold/"]
+    },
+    {
+      "name": "Active Customer",
+      "shortDescription": "A customer with at least one sales order in the trailing 12 months",
+      "longDescription": "Business definition: a KNA1 customer with at least one VBAK order where ERDAT is within the last 365 days and order status is not Cancelled. Used in Gold layer aggregations and Customer 360 RAG documents.",
+      "category": "Data Platform",
+      "status": "Approved",
+      "relatedAssets": ["rag-documents/customer-profiles/"]
+    },
+    {
+      "name": "Revenue",
+      "shortDescription": "Total billed net value (NETWR) for completed sales orders",
+      "longDescription": "Aggregated from VBRK/VBRP billing documents where billing status is Complete. Always in document currency (WAERK). Cross-referenced with Salesforce Opportunity.Amount for reconciliation.",
+      "category": "Data Platform",
+      "status": "Approved",
+      "relatedAssets": ["bronze/erp_sap/vbrk/", "bronze/erp_sap/vbrp/"]
+    },
+    {
+      "name": "Customer 360",
+      "shortDescription": "Unified customer profile combining data from all source systems",
+      "longDescription": "RAG document type aggregating SAP customer master (KNA1), billing history (VBRK/VBRP), Salesforce Account, Contacts, Opportunities, and Cases into a single Markdown profile per customer. 10,000 documents in rag-documents/customer-profiles/.",
+      "category": "Data Platform",
+      "status": "Approved",
+      "relatedAssets": ["rag-documents/customer-profiles/"]
+    }
+  ]
+}

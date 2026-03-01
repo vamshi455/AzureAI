@@ -1,0 +1,66 @@
+{
+  "custom_classifications": [
+    {
+      "name": "CUSTOM_CUSTOMER_DATA",
+      "description": "Customer PII data — names, addresses, contact info. Subject to GDPR/CCPA.",
+      "columnPatterns": [
+        {"pattern": "(?i)(customer_name|name1|cust_name|account_name)"},
+        {"pattern": "(?i)(email|smtp_addr|e_mail)"},
+        {"pattern": "(?i)(phone|telf1|mobile|fax)"},
+        {"pattern": "(?i)(address|stras|street|mailing_address)"},
+        {"pattern": "(?i)(postal|pstlz|zip_code)"},
+        {"pattern": "(?i)(city|ort01|ort02)"},
+        {"pattern": "(?i)(country|land1)"}
+      ]
+    },
+    {
+      "name": "CUSTOM_FINANCIAL_DATA",
+      "description": "Financial data — pricing, billing, revenue. Subject to SOX compliance.",
+      "columnPatterns": [
+        {"pattern": "(?i)(netwr|net_value|net_amount)"},
+        {"pattern": "(?i)(amount|revenue|price|total_price)"},
+        {"pattern": "(?i)(waerk|currency|currency_code)"},
+        {"pattern": "(?i)(credit_limit|klimk)"},
+        {"pattern": "(?i)(payment|billing|invoice)"},
+        {"pattern": "(?i)(annual_revenue|expected_revenue)"}
+      ]
+    },
+    {
+      "name": "CUSTOM_EMPLOYEE_DATA",
+      "description": "Internal employee data. Subject to internal privacy policies.",
+      "columnPatterns": [
+        {"pattern": "(?i)(employee|emp_id|personnel_number)"},
+        {"pattern": "(?i)(salary|compensation|benefits)"},
+        {"pattern": "(?i)(owner_name|created_by|modified_by)"}
+      ]
+    },
+    {
+      "name": "CUSTOM_MANUFACTURING_IP",
+      "description": "Manufacturing intellectual property — formulas, specifications, tolerances.",
+      "columnPatterns": [
+        {"pattern": "(?i)(recipe|formula|specification)"},
+        {"pattern": "(?i)(tolerance|process_param)"},
+        {"pattern": "(?i)(production_secret|proprietary)"}
+      ]
+    },
+    {
+      "name": "CUSTOM_REGULATORY_DATA",
+      "description": "Data subject to FDA, SEC, or EMA regulation — batch/lot tracking, quality.",
+      "columnPatterns": [
+        {"pattern": "(?i)(batch_number|charg|lot)"},
+        {"pattern": "(?i)(serial_number|sernr)"},
+        {"pattern": "(?i)(quality_check|inspection|compliance)"},
+        {"pattern": "(?i)(shelf_life|expiration)"}
+      ]
+    }
+  ],
+  "built_in_classifications_to_enable": [
+    "MICROSOFT.FINANCIAL.CREDIT_CARD_NUMBER",
+    "MICROSOFT.GOVERNMENT.US_SOCIAL_SECURITY_NUMBER",
+    "MICROSOFT.PERSONAL.EMAIL",
+    "MICROSOFT.PERSONAL.PHONE_NUMBER",
+    "MICROSOFT.PERSONAL.US_DRIVER_LICENSE_NUMBER",
+    "MICROSOFT.PERSONAL.US_PASSPORT_NUMBER",
+    "MICROSOFT.HEALTH.US_MEDICAL_RECORD_NUMBER"
+  ]
+}

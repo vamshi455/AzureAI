@@ -1,0 +1,1 @@
+# Purview governance configuration scripts

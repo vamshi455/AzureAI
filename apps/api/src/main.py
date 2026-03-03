@@ -18,6 +18,7 @@ from routes.chat import router as chat_router
 from routes.analytics import router as analytics_router
 from routes.tickets import router as tickets_router
 from services.equipment_tools import EquipmentTools
+from services.mcp_client import MCPClient, create_pg_mcp_client
 
 # --- Logging Configuration ---
 logging.basicConfig(
@@ -54,12 +55,29 @@ async def lifespan(app: FastAPI):
         logger.info("PGVECTOR_CONNECTION_STRING not set; equipment tools disabled.")
         app.state.equipment_tools = None
 
+    # Initialize MCP client for PostgreSQL server
+    mcp_pg: MCPClient | None = None
+    if os.getenv("MCP_PG_ENABLED", "true").lower() == "true":
+        try:
+            mcp_pg = create_pg_mcp_client()
+            await mcp_pg.connect()
+            app.state.mcp_pg = mcp_pg
+            logger.info(f"PostgreSQL MCP client ready — tools: {mcp_pg.tool_names}")
+        except Exception as e:
+            logger.warning(f"Could not start PostgreSQL MCP server: {e}")
+            app.state.mcp_pg = None
+    else:
+        app.state.mcp_pg = None
+
     logger.info("Application startup complete.")
 
     yield
 
     # Shutdown: close connections, flush buffers
     logger.info("Shutting down Azure Data Platform API...")
+    if mcp_pg:
+        await mcp_pg.disconnect()
+        logger.info("MCP PostgreSQL client disconnected.")
     if pg_pool:
         await pg_pool.close()
         logger.info("PostgreSQL pool closed.")

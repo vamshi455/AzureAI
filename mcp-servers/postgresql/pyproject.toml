@@ -1,0 +1,17 @@
+[project]
+name = "pg-mcp-server"
+version = "1.0.0"
+description = "MCP server exposing PostgreSQL databases for AI agents"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "asyncpg>=0.30.0",
+    "python-dotenv>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+pg-mcp-server = "pg_mcp_server.server:main"

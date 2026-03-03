@@ -74,6 +74,7 @@ AGENT_DEPLOYMENTS = {
         "temperature": 0.1,
         "max_tokens": 4096,
         "tools": True,  # Uses function-calling tools via AgentExecutor
+        "mcp_server": "pg",  # Prefer PostgreSQL MCP server for tool discovery
     },
 }
 
@@ -257,27 +258,51 @@ async def chat(request: ChatRequest, raw_request: Request):
 async def _handle_tool_agent(
     raw_request: Request, agent_config: dict, messages: list[dict], agent_id: str
 ) -> ChatResponse:
-    """Handle agents that use function-calling tools via AgentExecutor."""
-    from services.equipment_tools import EquipmentTools
+    """
+    Handle agents that use function-calling tools via AgentExecutor.
 
-    # Get the equipment tools from app state (initialized in lifespan)
-    equipment_tools: EquipmentTools | None = getattr(
-        raw_request.app.state, "equipment_tools", None
-    )
+    Prefers MCP server (dynamic tool discovery) when available,
+    falls back to direct EquipmentTools handlers.
+    """
+    tools: list[dict] | None = None
+    tool_handlers: dict | None = None
 
-    if equipment_tools is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Equipment tools not initialized. Database connection may be unavailable.",
+    # --- Path 1: MCP server (preferred) ---
+    mcp_key = agent_config.get("mcp_server")
+    if mcp_key:
+        from services.mcp_client import MCPClient
+
+        mcp_client: MCPClient | None = getattr(
+            raw_request.app.state, f"mcp_{mcp_key}", None
+        )
+        if mcp_client and mcp_client.connected:
+            tools = mcp_client.get_openai_tools()
+            tool_handlers = mcp_client.get_tool_handlers()
+            logger.info(f"Agent '{agent_id}' using MCP server (tools: {mcp_client.tool_names})")
+
+    # --- Path 2: Direct tool handlers (fallback) ---
+    if tool_handlers is None:
+        from services.equipment_tools import EquipmentTools
+
+        equipment_tools: EquipmentTools | None = getattr(
+            raw_request.app.state, "equipment_tools", None
         )
 
-    tool_handlers = {
-        "get_equipment_status": equipment_tools.get_equipment_status,
-        "list_equipment_by_risk": equipment_tools.list_equipment_by_risk,
-        "get_sensor_readings": equipment_tools.get_sensor_readings,
-        "search_maintenance_docs": equipment_tools.search_maintenance_docs,
-        "get_equipment_anomalies": equipment_tools.get_equipment_anomalies,
-    }
+        if equipment_tools is None:
+            raise HTTPException(
+                status_code=503,
+                detail="No tool backend available. Neither MCP server nor direct tools are initialized.",
+            )
+
+        tools = EQUIPMENT_HEALTH_TOOLS
+        tool_handlers = {
+            "get_equipment_status": equipment_tools.get_equipment_status,
+            "list_equipment_by_risk": equipment_tools.list_equipment_by_risk,
+            "get_sensor_readings": equipment_tools.get_sensor_readings,
+            "search_maintenance_docs": equipment_tools.search_maintenance_docs,
+            "get_equipment_anomalies": equipment_tools.get_equipment_anomalies,
+        }
+        logger.info(f"Agent '{agent_id}' using direct tool handlers (fallback)")
 
     executor = AgentExecutor(ai_service=ai_service, tool_handlers=tool_handlers)
 
@@ -285,7 +310,7 @@ async def _handle_tool_agent(
         result = await executor.run(
             deployment_name=agent_config["deployment_name"],
             messages=messages,
-            tools=EQUIPMENT_HEALTH_TOOLS,
+            tools=tools,
             temperature=agent_config["temperature"],
             max_tokens=agent_config["max_tokens"],
         )

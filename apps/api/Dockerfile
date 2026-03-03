@@ -1,6 +1,7 @@
 # --------------------------------------------------
 # Stage 1: Build dependencies
 # --------------------------------------------------
+# Build context: repository root (az acr build -f apps/api/Dockerfile .)
 FROM python:3.11-slim AS builder
 
 WORKDIR /build
@@ -10,8 +11,13 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc libpq-dev && \
     rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+# Install API requirements
+COPY apps/api/requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# Install PostgreSQL MCP server
+COPY mcp-servers/postgresql/ /build/mcp-server/
+RUN pip install --no-cache-dir --prefix=/install /build/mcp-server/
 
 # --------------------------------------------------
 # Stage 2: Runtime
@@ -31,10 +37,14 @@ RUN apt-get update && \
 COPY --from=builder /install /usr/local
 
 # Copy application source
-COPY src/ ./
+COPY apps/api/src/ ./
+
+# Copy system prompts and agent configs (chat.py resolves 5 parents up → /)
+COPY ai/prompts/system/ /ai/prompts/system/
+COPY ai/agents/configs/ /ai/agents/configs/
 
 # Set ownership
-RUN chown -R appuser:appuser /app
+RUN chown -R appuser:appuser /app /ai
 
 USER appuser
 
@@ -44,10 +54,11 @@ ENV ENVIRONMENT=production
 ENV LOG_LEVEL=INFO
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV MCP_PG_ENABLED=false
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--access-log"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--access-log"]

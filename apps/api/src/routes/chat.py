@@ -69,7 +69,7 @@ AGENT_DEPLOYMENTS = {
         "max_tokens": 2048,
     },
     "equipment-health-agent": {
-        "deployment_name": "gpt-4o",
+        "deployment_name": "gpt-4o-equipment-health",
         "system_prompt_file": "ai/prompts/system/equipment_health.md",
         "temperature": 0.1,
         "max_tokens": 4096,

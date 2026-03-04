@@ -119,10 +119,10 @@ PUBLIC_PATHS = {"/", "/docs", "/redoc", "/openapi.json", "/health", "/health/rea
 
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
-    """Require X-API-Key header for /api/* routes. Public paths are exempt."""
+    """Require API key for /api/* routes. Accepts X-API-Key header or ?api_key= query param."""
     path = request.url.path.rstrip("/") or "/"
     if API_KEY and path not in PUBLIC_PATHS and path.startswith("/api/"):
-        key = request.headers.get("X-API-Key", "")
+        key = request.headers.get("X-API-Key") or request.query_params.get("api_key", "")
         if key != API_KEY:
             return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
     return await call_next(request)

@@ -112,6 +112,22 @@ app.add_middleware(
 )
 
 
+# --- API Key Middleware ---
+API_KEY = os.getenv("API_KEY", "")
+PUBLIC_PATHS = {"/", "/docs", "/redoc", "/openapi.json", "/health", "/health/ready"}
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """Require X-API-Key header for /api/* routes. Public paths are exempt."""
+    path = request.url.path.rstrip("/") or "/"
+    if API_KEY and path not in PUBLIC_PATHS and path.startswith("/api/"):
+        key = request.headers.get("X-API-Key", "")
+        if key != API_KEY:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+    return await call_next(request)
+
+
 # --- Request Logging Middleware ---
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
